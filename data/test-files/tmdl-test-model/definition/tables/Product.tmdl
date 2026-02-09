@@ -1,0 +1,32 @@
+table Product
+	lineageTag: test-product-001
+
+	column ProductKey
+		dataType: int64
+		sourceColumn: ProductKey
+
+	column 'Product Name'
+		dataType: string
+		sourceColumn: ProductName
+
+	column Category
+		dataType: string
+		sourceColumn: Category
+
+	column Subcategory
+		dataType: string
+		sourceColumn: Subcategory
+
+	column 'Unit Price'
+		dataType: decimal
+		formatString: $#,##0.00
+		sourceColumn: UnitPrice
+
+	hierarchy 'Product Hierarchy'
+		level Category
+		level Subcategory
+		level 'Product Name'
+
+	partition Product = m
+		mode: import
+		source = Source

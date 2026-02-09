@@ -1,0 +1,42 @@
+table Date
+	lineageTag: test-date-001
+
+	measure 'Current Year' = YEAR(TODAY())
+		formatString: 0
+
+	column Date
+		dataType: dateTime
+		formatString: d/m/yyyy
+		sourceColumn: Date
+
+	column Year
+		dataType: int64
+		sourceColumn: Year
+
+	column Quarter
+		dataType: string
+		sourceColumn: Quarter
+
+	column Month
+		dataType: string
+		sourceColumn: Month
+		sortByColumn: MonthNumber
+
+	column MonthNumber
+		dataType: int64
+		isHidden
+		sourceColumn: MonthNumber
+
+	hierarchy 'Date Hierarchy'
+		level Year
+		level Quarter
+		level Month
+
+	partition Date = m
+		mode: import
+		source =
+			let
+			    Source = List.Dates(#date(2020,1,1), 1461, #duration(1,0,0,0)),
+			    Table = Table.FromList(Source)
+			in
+			    Table

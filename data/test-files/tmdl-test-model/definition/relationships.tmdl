@@ -1,0 +1,17 @@
+relationship Sales_Product
+	fromColumn: Sales.ProductKey
+	toColumn: Product.ProductKey
+
+relationship Sales_Customer
+	fromColumn: Sales.CustomerKey
+	toColumn: Customer.CustomerKey
+
+relationship Sales_Date
+	fromColumn: Sales.OrderDate
+	toColumn: Date.Date
+
+relationship Sales_Date_Inactive
+	isActive: false
+	crossFilteringBehavior: bothDirections
+	fromColumn: Sales.OrderDate
+	toColumn: Date.Date
