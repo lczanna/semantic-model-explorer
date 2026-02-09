@@ -824,3 +824,218 @@ class TestDownloadedFiles:
 
         stats = get_header_stats(app)
         assert "Relationships" in stats
+
+
+# ============================================================
+# PBIX Data Extraction Tests
+# ============================================================
+
+
+class TestPbixDataExtraction:
+    """Tests for .pbix VertiPaq data extraction and Data tab."""
+
+    def test_pbix_loads_with_data_model(self, app: Page):
+        """Test that a .pbix file loads and exposes a data model."""
+        pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
+        if not os.path.exists(pbix_path):
+            pytest.skip("Revenue_Opportunities.pbix not available")
+
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+
+        badge = app.text_content("#modelFormat")
+        assert badge == "pbix"
+
+        stats = get_header_stats(app)
+        assert "8 Tables" in stats
+        assert "6 Measures" in stats
+        assert "5 Relationships" in stats
+
+    def test_pbix_data_tab_visible(self, app: Page):
+        """Test that Data tab button appears for .pbix files."""
+        pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
+        if not os.path.exists(pbix_path):
+            pytest.skip("Revenue_Opportunities.pbix not available")
+
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+
+        display = app.evaluate(
+            "() => document.getElementById('dataTabBtn').style.display"
+        )
+        assert display != "none", "Data tab should be visible for .pbix"
+
+    def test_pbix_data_tab_hidden_for_bim(self, app: Page):
+        """Test that Data tab is NOT shown for .bim files."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+
+        display = app.evaluate(
+            "() => document.getElementById('dataTabBtn').style.display"
+        )
+        assert display == "none", "Data tab should be hidden for .bim"
+
+    def test_pbix_no_internal_tables_in_data_tab(self, app: Page):
+        """Test that internal tables (H$, R$, U$, etc.) are excluded from Data tab."""
+        pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
+        if not os.path.exists(pbix_path):
+            pytest.skip("Revenue_Opportunities.pbix not available")
+
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+
+        table_names = app.evaluate(
+            "() => appState.model._pbixDataModel.tableNames"
+        )
+        for name in table_names:
+            assert not name.startswith("H$"), f"Internal table in Data tab: {name}"
+            assert not name.startswith("R$"), f"Internal table in Data tab: {name}"
+            assert not name.startswith("U$"), f"Internal table in Data tab: {name}"
+            assert not name.startswith("LocalDateTable_"), f"Internal table: {name}"
+            assert not name.startswith("DateTableTemplate_"), f"Internal table: {name}"
+
+    def test_pbix_no_internal_tables_in_model_tab(self, app: Page):
+        """Test that internal tables are excluded from Model tab tree."""
+        pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
+        if not os.path.exists(pbix_path):
+            pytest.skip("Revenue_Opportunities.pbix not available")
+
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+
+        table_names = app.evaluate(
+            "() => appState.model.tables.map(t => t.name)"
+        )
+        for name in table_names:
+            assert not name.startswith("H$"), f"Internal table in model: {name}"
+            assert not name.startswith("R$"), f"Internal table in model: {name}"
+            assert not name.startswith("U$"), f"Internal table in model: {name}"
+
+    def test_pbix_data_table_list(self, app: Page):
+        """Test that the Data tab lists the expected user tables."""
+        pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
+        if not os.path.exists(pbix_path):
+            pytest.skip("Revenue_Opportunities.pbix not available")
+
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+
+        click_tab(app, "data")
+        app.wait_for_selector("#dataTableList .data-table-item", timeout=5000)
+
+        items = app.query_selector_all("#dataTableList .data-table-item")
+        table_names = [item.text_content() for item in items]
+        assert len(table_names) == 8, f"Expected 8 user tables, got {len(table_names)}"
+        for name in ["Account", "Fact", "Opportunity", "Partner", "Product", "SalesStage"]:
+            assert name in table_names, f"Expected table '{name}' in Data tab"
+
+    def test_pbix_extract_table_data(self, app: Page):
+        """Test that clicking a table in Data tab extracts row data."""
+        pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
+        if not os.path.exists(pbix_path):
+            pytest.skip("Revenue_Opportunities.pbix not available")
+
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+
+        click_tab(app, "data")
+        app.wait_for_selector("#dataTableList .data-table-item", timeout=5000)
+
+        # Click the Account table
+        items = app.query_selector_all("#dataTableList .data-table-item")
+        for item in items:
+            if item.text_content() == "Account":
+                item.click()
+                break
+
+        # Wait for data to render
+        app.wait_for_selector(".data-table th", timeout=30000)
+
+        headers = app.query_selector_all(".data-table th")
+        header_names = [h.text_content() for h in headers]
+        assert len(header_names) > 0, "No column headers in data preview"
+
+        rows = app.query_selector_all(".data-table tbody tr")
+        assert len(rows) > 0, "No data rows in preview"
+
+        # Check row count display
+        row_count_text = app.text_content("#dataRowCount")
+        assert "rows" in row_count_text
+
+    def test_pbix_export_buttons_enabled(self, app: Page):
+        """Test that CSV and Parquet export buttons are enabled after loading data."""
+        pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
+        if not os.path.exists(pbix_path):
+            pytest.skip("Revenue_Opportunities.pbix not available")
+
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+
+        click_tab(app, "data")
+        app.wait_for_selector("#dataTableList .data-table-item", timeout=5000)
+
+        items = app.query_selector_all("#dataTableList .data-table-item")
+        items[0].click()
+        app.wait_for_selector(".data-table th", timeout=30000)
+
+        csv_disabled = app.get_attribute("#exportCsvBtn", "disabled")
+        parquet_disabled = app.get_attribute("#exportParquetBtn", "disabled")
+        assert csv_disabled is None, "CSV button should be enabled"
+        assert parquet_disabled is None, "Parquet button should be enabled"
+
+    def test_pbix_relationships_correct(self, app: Page):
+        """Test that .pbix relationships are correctly parsed."""
+        pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
+        if not os.path.exists(pbix_path):
+            pytest.skip("Revenue_Opportunities.pbix not available")
+
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+
+        rels = app.evaluate(
+            "() => appState.model.relationships.map(r => r.fromTable + '.' + r.fromColumn + '->' + r.toTable + '.' + r.toColumn)"
+        )
+        assert len(rels) == 5, f"Expected 5 relationships, got {len(rels)}"
+        assert "Fact.Account ID->Account.Account ID" in rels
+
+    def test_pbix_csv_export_produces_data(self, app: Page):
+        """Test that CSV export produces correct output via internal function."""
+        pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
+        if not os.path.exists(pbix_path):
+            pytest.skip("Revenue_Opportunities.pbix not available")
+
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+
+        csv_output = app.evaluate("""() => {
+            const data = appState.model._pbixDataModel.getTable('Account');
+            return tableToCSV(data);
+        }""")
+
+        assert csv_output is not None
+        lines = csv_output.strip().split("\n")
+        assert len(lines) > 1, "CSV should have header + data rows"
+        # Header should have column names
+        header = lines[0]
+        assert "Account" in header or "Region" in header
+
+    def test_pbix_corporate_spend(self, app: Page):
+        """Test loading the Corporate_Spend .pbix file."""
+        pbix_path = os.path.join(TEST_FILES, "Corporate_Spend.pbix")
+        if not os.path.exists(pbix_path):
+            pytest.skip("Corporate_Spend.pbix not available")
+
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+
+        badge = app.text_content("#modelFormat")
+        assert badge == "pbix"
+
+        stats = get_header_stats(app)
+        assert "Tables" in stats
+
+        # Data tab should be available
+        display = app.evaluate(
+            "() => document.getElementById('dataTabBtn').style.display"
+        )
+        assert display != "none", "Data tab should be visible for .pbix"

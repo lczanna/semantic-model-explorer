@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:;">
+<title>Semantic Model Explorer</title>
+<style>
+{{STYLES}}
+</style>
+</head>
+<body>
+
+<!-- Drop Zone -->
+<div class="drop-zone-wrap" id="dropZoneWrap">
+  <div class="drop-zone" id="dropZone">
+    <h2>Drop a Power BI file here</h2>
+    <p>Explore the semantic model, copy everything for an LLM</p>
+    <div class="file-types">.pbix &nbsp; .pbit &nbsp; .pbip &nbsp; .bim</div>
+    <label class="browse-btn">
+      Browse Files
+      <input type="file" id="fileInput" multiple accept=".pbix,.pbit,.bim,.zip">
+    </label>
+    <div class="privacy-note">Runs locally in your browser. Your files never leave your machine.</div>
+  </div>
+</div>
+
+<!-- Loading -->
+<div class="loading-wrap" id="loadingWrap">
+  <div class="spinner"></div>
+  <div class="loading-text" id="loadingText">Parsing model...</div>
+</div>
+
+<!-- Error Banner -->
+<div class="error-banner" id="errorBanner">
+  <strong>Some issues occurred:</strong>
+  <ul id="errorList"></ul>
+</div>
+
+<!-- Main App -->
+<div class="app-wrap" id="appWrap">
+  <div class="app-header">
+    <div class="model-info">
+      <span class="model-name" id="modelName"></span>
+      <span class="model-badge" id="modelFormat"></span>
+      <span class="model-stats" id="modelStats"></span>
+    </div>
+    <div class="header-actions">
+      <span class="token-badge" id="tokenBadge"></span>
+      <select class="prompt-select" id="promptSelectHeader" style="width:auto;padding:4px 8px;">
+        <option value="">Copy All</option>
+        <option value="analyze">+ Analyze prompt</option>
+        <option value="document">+ Document prompt</option>
+        <option value="optimize">+ Optimize prompt</option>
+        <option value="explain">+ Explain prompt</option>
+      </select>
+      <button class="btn btn-primary" id="copyAllBtn">Copy All</button>
+      <span class="new-file-link" id="newFileBtn">New File</span>
+    </div>
+  </div>
+  <div class="tab-bar" id="tabBar">
+    <button class="tab-btn active" data-tab="model">Model</button>
+    <button class="tab-btn" data-tab="diagram">Diagram</button>
+    <button class="tab-btn" data-tab="data" id="dataTabBtn" style="display:none">Data</button>
+  </div>
+
+  <!-- Model Tab -->
+  <div class="tab-content active" id="tab-model">
+    <div class="model-tab">
+      <div class="model-tree-panel">
+        <div class="tree-toolbar">
+          <input type="text" class="tree-search" id="treeSearch" placeholder="Search tables, measures, columns...">
+          <div class="tree-controls">
+            <label style="font-size:11px;display:flex;align-items:center;gap:4px;cursor:pointer;">
+              <input type="checkbox" id="selectAll" style="accent-color:var(--accent);"> Select All
+            </label>
+            <label style="font-size:11px;display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--text2);">
+              <input type="checkbox" id="showHidden" style="accent-color:var(--accent);"> Hidden
+            </label>
+          </div>
+        </div>
+        <div class="tree-scroll" id="treeScroll"></div>
+        <div class="tree-footer">
+          <div style="display:flex;gap:6px;align-items:center;">
+            <select class="prompt-select" id="promptSelect">
+              <option value="">No prompt</option>
+              <option value="analyze">Analyze best practices</option>
+              <option value="document">Generate documentation</option>
+              <option value="optimize">Suggest optimizations</option>
+              <option value="explain">Explain in plain language</option>
+            </select>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;justify-content:space-between;">
+            <button class="btn btn-primary" id="copySelectedBtn">Copy Selected</button>
+            <span class="token-badge" id="selectedTokenBadge">~0 tokens</span>
+          </div>
+        </div>
+      </div>
+      <div class="detail-panel" id="detailPanel">
+        <div class="detail-empty">Select an item to see details</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Diagram Tab -->
+  <div class="tab-content" id="tab-diagram">
+    <div class="diagram-tab">
+      <div class="diagram-toolbar">
+        <input type="text" class="search-input" id="diagramSearch" placeholder="Search tables...">
+        <button class="btn btn-small" id="dgZoomIn" title="Zoom In">+</button>
+        <button class="btn btn-small" id="dgZoomOut" title="Zoom Out">-</button>
+        <button class="btn btn-small" id="dgFit" title="Fit">Fit</button>
+        <button class="btn btn-small" id="dgRelayout" title="Relayout">Relayout</button>
+        <label style="font-size:11px;display:flex;align-items:center;gap:4px;margin-left:auto;cursor:pointer;color:var(--text2);">
+          <input type="checkbox" id="dgShowHidden" style="accent-color:var(--accent);"> Show Hidden
+        </label>
+      </div>
+      <div class="diagram-body">
+        <div class="diagram-container" id="diagramContainer"></div>
+        <div class="diagram-side-panel" id="diagramSidePanel"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Data Tab (visible only for .pbix with DataModel) -->
+  <div class="tab-content" id="tab-data">
+    <div class="data-tab">
+      <div class="data-sidebar">
+        <div class="data-sidebar-header">Tables</div>
+        <div class="data-table-list" id="dataTableList"></div>
+      </div>
+      <div class="data-main">
+        <div class="data-toolbar" id="dataToolbar">
+          <span class="data-table-name" id="dataTableName">Select a table</span>
+          <span class="data-row-count" id="dataRowCount"></span>
+          <div style="margin-left:auto;display:flex;gap:6px;">
+            <button class="btn btn-small" id="exportCsvBtn" disabled>Export CSV</button>
+            <button class="btn btn-small" id="exportParquetBtn" disabled>Export Parquet</button>
+          </div>
+        </div>
+        <div class="data-preview" id="dataPreview">
+          <div class="detail-empty">Select a table to preview its data</div>
+        </div>
+        <div class="data-status" id="dataStatus"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<!-- XPress9 Emscripten WASM Module -->
+<script>
+{{XPRESS9_GLUE}}
+</script>
+
+<!-- Main Application -->
+<script>
+'use strict';
+{{APP_JS}}
+</script>
+
+<!-- VertiPaq Decoder: XPress9 + ABF + VertiPaq column extraction -->
+<script>
+'use strict';
+{{VERTIPAQ_JS}}
+</script>
+
+<!-- Data Export: CSV + Parquet -->
+<script>
+'use strict';
+{{EXPORT_JS}}
+</script>
+
+<!-- JSZip v3.10.1 -->
+<script>
+{{JSZIP}}
+</script>
+
+<!-- Cytoscape v3.30.4 -->
+<script>
+{{CYTOSCAPE}}
+</script>
+
+<!-- hyparquet-writer (Parquet file writer) -->
+<script>
+{{HYPARQUET_WRITER}}
+</script>
+
+</body>
+</html>
