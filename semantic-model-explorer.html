@@ -5,50 +5,105 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:;">
 <title>Semantic Model Explorer</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='12'%20fill='%230f172a'/%3E%3Crect%20x='6'%20y='6'%20width='52'%20height='52'%20rx='10'%20fill='%2360c0a0'/%3E%3Ctext%20x='32'%20y='41'%20font-size='24'%20text-anchor='middle'%20fill='%230b1020'%20font-family='Arial,sans-serif'%20font-weight='700'%3ESM%3C/text%3E%3C/svg%3E">
 <style>
 :root {
-  --bg: #1e1e2e;
-  --bg2: #252536;
-  --bg3: #2d2d42;
-  --bg4: #363650;
-  --text: #e0e0e8;
-  --text2: #a0a0b8;
+  --bg: #171b20;
+  --bg2: #1d232b;
+  --bg3: #252d37;
+  --bg4: #2d3743;
+  --text: #e8edf3;
+  --text2: #bac4d0;
+  --text-muted: #8c99a8;
+  --text-dim: #6e7b8c;
   --accent: #60c0a0;
   --accent2: #4da888;
   --accent3: #367a63;
-  --border: #3a3a52;
-  --hover: #32324a;
-  --warn: #d4a040;
-  --err: #d06060;
-  --blue: #6090d0;
-  --purple: #a080d0;
-  --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --border: #3e4b5d;
+  --border-subtle: #313b48;
+  --hover: #252d37;
+  --warn: #c88a36;
+  --err: #c65364;
+  --blue: #4c86c8;
+  --purple: #7a67c7;
+  --font: 'IBM Plex Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
   --mono: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  --radius-sm: 6px; --radius-md: 10px; --radius-lg: 14px;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
-html, body { height: 100%; font-family: var(--font); background: var(--bg); color: var(--text); font-size: 14px; }
+html, body { height: 100%; font-family: var(--font); background: linear-gradient(180deg, var(--bg) 0%, #111418 38%, #111418 100%); color: var(--text); font-size: 14px; }
+body::before {
+  content: ''; position: fixed; inset: 0;
+  background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.03) 1px, transparent 0);
+  background-size: 44px 44px; opacity: 0.5; pointer-events: none; z-index: 0;
+}
+
+/* Landing Page */
+.landing-wrap { display: flex; align-items: center; justify-content: center; height: 100%; padding: 20px; position: relative; z-index: 1; }
+.landing-container { max-width: 720px; width: 100%; }
+.landing-header {
+  display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;
+  padding: 16px 18px; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg);
+  background: rgba(23, 27, 32, 0.9); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+.logo { display: flex; align-items: center; gap: 14px; }
+.logo-icon {
+  width: 40px; height: 40px;
+  background: linear-gradient(135deg, #3a7e76, var(--accent));
+  border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 15px; color: #0b1020;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.06) inset; flex-shrink: 0;
+}
+.landing-header h1 { font-size: 19px; font-weight: 600; letter-spacing: -0.03em; }
+.landing-subtitle { font-size: 12.5px; color: var(--text-muted); }
+.privacy-badge {
+  display: flex; align-items: center; gap: 6px; padding: 6px 14px;
+  background: rgba(96,192,160,0.12); border: 1px solid rgba(96,192,160,0.35);
+  border-radius: 20px; font-size: 11.5px; color: var(--accent); font-weight: 500; white-space: nowrap;
+}
 
 /* Drop Zone */
-.drop-zone-wrap { display: flex; align-items: center; justify-content: center; height: 100%; padding: 20px; }
 .drop-zone {
-  border: 2px dashed var(--border); border-radius: 16px; padding: 60px 40px;
-  text-align: center; max-width: 520px; width: 100%; transition: border-color 0.2s, background 0.2s;
-  cursor: pointer;
+  border: 2px dashed var(--border); border-radius: var(--radius-lg); padding: 56px 32px;
+  text-align: center; transition: all 0.3s; cursor: pointer; background: var(--bg); position: relative; overflow: hidden;
 }
-.drop-zone.drag-over { border-color: var(--accent); background: rgba(96,192,160,0.06); }
-.drop-zone h2 { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
-.drop-zone p { color: var(--text2); margin-bottom: 16px; font-size: 13px; }
-.file-types { color: var(--accent); font-family: var(--mono); font-size: 13px; margin-bottom: 20px; letter-spacing: 1px; }
+.drop-zone::before { content:''; position:absolute; inset:0; background:radial-gradient(ellipse at center,rgba(96,192,160,0.08) 0%,transparent 70%); opacity:0; transition:opacity 0.3s; }
+.drop-zone:hover::before, .drop-zone.drag-over::before { opacity:1; }
+.drop-zone:hover, .drop-zone.drag-over { border-color: var(--accent); }
+.drop-zone-icon {
+  width: 72px; height: 72px; margin: 0 auto 20px; background: var(--bg3);
+  border: 1px solid var(--border); border-radius: 18px;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform 0.3s, border-color 0.3s;
+}
+.drop-zone:hover .drop-zone-icon { transform: translateY(-2px); border-color: var(--accent); }
+.drop-zone-icon svg { color: var(--text-muted); transition: color 0.3s; }
+.drop-zone:hover .drop-zone-icon svg { color: var(--accent); }
+.drop-zone h2 { font-size: 17px; font-weight: 600; margin-bottom: 6px; }
+.drop-zone p { color: var(--text-muted); font-size: 13px; }
+.file-types { display: flex; gap: 8px; justify-content: center; margin-top: 14px; }
+.file-type-badge { padding: 3px 10px; background: var(--bg3); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); font-size: 11px; font-family: var(--mono); color: var(--text-muted); }
 .browse-btn {
-  display: inline-block; padding: 10px 24px; background: var(--accent3); color: var(--text);
-  border-radius: 8px; cursor: pointer; font-size: 14px; transition: background 0.2s;
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 20px; padding: 10px 22px;
+  background: var(--accent); color: #0f171f; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: all 0.2s; font-family: inherit; box-shadow: 0 2px 10px rgba(0,0,0,0.24);
 }
-.browse-btn:hover { background: var(--accent2); }
+.browse-btn:hover { transform: translateY(-1px); background: #39b7aa; box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
 .browse-btn input { display: none; }
-.privacy-note { color: var(--text2); font-size: 11px; margin-top: 16px; }
+
+/* Footer */
+.footer-note { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); color: var(--text-dim); font-size: 11.5px; }
+.footer-note > div + div { margin-top: 3px; }
+.footer-note code { color: var(--text2); font-family: var(--mono); font-size: 11px; }
+
+/* Scrollbars */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
 
 /* Loading */
-.loading-wrap { display: none; align-items: center; justify-content: center; height: 100%; flex-direction: column; gap: 16px; }
+.loading-wrap { display: none; align-items: center; justify-content: center; height: 100%; flex-direction: column; gap: 16px; position: relative; z-index: 1; }
 .spinner { width: 40px; height: 40px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .loading-text { color: var(--text2); font-size: 14px; }
@@ -58,7 +113,7 @@ html, body { height: 100%; font-family: var(--font); background: var(--bg); colo
 .error-banner ul { margin: 4px 0 0 20px; }
 
 /* Main App */
-.app-wrap { display: none; height: 100%; flex-direction: column; }
+.app-wrap { display: none; height: 100%; flex-direction: column; position: relative; z-index: 1; }
 
 /* Header */
 .app-header {
@@ -116,7 +171,9 @@ html, body { height: 100%; font-family: var(--font); background: var(--bg); colo
 .tree-footer {
   padding: 8px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px;
 }
-.prompt-select { width: 100%; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 12px; font-family: var(--font); }
+.prompt-label { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.prompt-select { padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 12px; font-family: var(--font); }
+.prompt-select-secondary { background: transparent; color: var(--text2); font-size: 11px; }
 
 /* Tree items */
 .tree-section { }
@@ -208,24 +265,24 @@ html, body { height: 100%; font-family: var(--font); background: var(--bg); colo
 .toast.show { opacity: 1; }
 
 /* Data Tab */
-.data-tab { display: flex; height: 100%; }
-.data-sidebar { width: 220px; min-width: 180px; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+.data-tab { display: flex; height: 100%; overflow: hidden; width: 100%; }
+.data-sidebar { width: 220px; min-width: 180px; border-right: 1px solid var(--border); display: flex; flex-direction: column; background: var(--bg2); }
 .data-sidebar-header { padding: 10px 12px; font-size: 12px; font-weight: 600; color: var(--text2); border-bottom: 1px solid var(--border); }
 .data-table-list { flex: 1; overflow-y: auto; }
 .data-table-item { padding: 8px 12px; font-size: 13px; cursor: pointer; border-bottom: 1px solid var(--border); color: var(--text); }
 .data-table-item:hover { background: var(--hover); }
 .data-table-item.active { background: var(--accent); color: #fff; }
-.data-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-.data-toolbar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
-.data-table-name { font-weight: 600; font-size: 14px; }
-.data-row-count { font-size: 12px; color: var(--text2); }
+.data-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+.data-toolbar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--bg2); flex-shrink: 0; }
+.data-table-name { font-weight: 600; font-size: 14px; white-space: nowrap; }
+.data-row-count { font-size: 12px; color: var(--text2); white-space: nowrap; }
 .data-preview { flex: 1; overflow: auto; padding: 0; }
-.data-status { padding: 4px 12px; font-size: 11px; color: var(--text2); min-height: 20px; }
+.data-status { padding: 4px 12px; font-size: 11px; color: var(--text2); min-height: 20px; flex-shrink: 0; }
 .data-truncated { padding: 8px 12px; font-size: 12px; color: var(--text2); text-align: center; border-top: 1px solid var(--border); }
 
 /* Data Table (preview grid) */
-.data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.data-table th { position: sticky; top: 0; background: var(--bg2); padding: 6px 10px; text-align: left; font-weight: 600; border-bottom: 2px solid var(--border); white-space: nowrap; }
+.data-table { border-collapse: collapse; font-size: 12px; }
+.data-table th { position: sticky; top: 0; z-index: 1; background: var(--bg2); padding: 6px 10px; text-align: left; font-weight: 600; border-bottom: 2px solid var(--border); white-space: nowrap; }
 .data-table td { padding: 4px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
 .data-table tr:hover td { background: var(--hover); }
 .null-val { color: var(--text2); font-style: italic; }
@@ -241,17 +298,42 @@ html, body { height: 100%; font-family: var(--font); background: var(--bg); colo
 </head>
 <body>
 
-<!-- Drop Zone -->
-<div class="drop-zone-wrap" id="dropZoneWrap">
-  <div class="drop-zone" id="dropZone">
-    <h2>Drop a Power BI file here</h2>
-    <p>Explore the semantic model, copy everything for an LLM</p>
-    <div class="file-types">.pbix &nbsp; .pbit &nbsp; .pbip &nbsp; .bim</div>
-    <label class="browse-btn">
-      Browse Files
-      <input type="file" id="fileInput" multiple accept=".pbix,.pbit,.bim,.zip">
-    </label>
-    <div class="privacy-note">Runs locally in your browser. Your files never leave your machine.</div>
+<!-- Landing Page -->
+<div class="landing-wrap" id="dropZoneWrap">
+  <div class="landing-container">
+    <header class="landing-header">
+      <div class="logo">
+        <div class="logo-icon">SM</div>
+        <div><h1>Semantic Model Explorer</h1><div class="landing-subtitle">Explore Power BI semantic models &amp; copy as LLM-ready Markdown</div></div>
+      </div>
+      <div class="privacy-badge">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        100% local, no network needed
+      </div>
+    </header>
+
+    <div class="drop-zone" id="dropZone">
+      <div class="drop-zone-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="32" height="32"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      </div>
+      <h2>Drop your files here</h2>
+      <p>Drag a Power BI file or browse to select one</p>
+      <div class="file-types">
+        <span class="file-type-badge">.pbix</span>
+        <span class="file-type-badge">.pbit</span>
+        <span class="file-type-badge">.bim</span>
+        <span class="file-type-badge">.zip</span>
+      </div>
+      <label class="browse-btn">
+        Browse Files
+        <input type="file" id="fileInput" multiple accept=".pbix,.pbit,.bim,.zip">
+      </label>
+    </div>
+
+    <div class="footer-note">
+      <div>Files never leave your browser. You can also download this page as <code>semantic-model-explorer.html</code> and use it offline.</div>
+      <div>Built with JSZip, Cytoscape.js, and XPress9.</div>
+    </div>
   </div>
 </div>
 
@@ -277,12 +359,13 @@ html, body { height: 100%; font-family: var(--font); background: var(--bg); colo
     </div>
     <div class="header-actions">
       <span class="token-badge" id="tokenBadge"></span>
-      <select class="prompt-select" id="promptSelectHeader" style="width:auto;padding:4px 8px;">
-        <option value="">Copy All</option>
-        <option value="analyze">+ Analyze prompt</option>
-        <option value="document">+ Document prompt</option>
-        <option value="optimize">+ Optimize prompt</option>
-        <option value="explain">+ Explain prompt</option>
+      <span class="prompt-label">LLM prompt:</span>
+      <select class="prompt-select prompt-select-secondary" id="promptSelectHeader" title="Optionally prepend an LLM prompt template to copied text">
+        <option value="">No prompt</option>
+        <option value="analyze">+ Analyze best practices</option>
+        <option value="document">+ Generate documentation</option>
+        <option value="optimize">+ Suggest optimizations</option>
+        <option value="explain">+ Explain in plain language</option>
       </select>
       <button class="btn btn-primary" id="copyAllBtn">Copy All</button>
       <span class="new-file-link" id="newFileBtn">New File</span>
@@ -312,12 +395,13 @@ html, body { height: 100%; font-family: var(--font); background: var(--bg); colo
         <div class="tree-scroll" id="treeScroll"></div>
         <div class="tree-footer">
           <div style="display:flex;gap:6px;align-items:center;">
-            <select class="prompt-select" id="promptSelect">
+            <span class="prompt-label">LLM prompt:</span>
+          <select class="prompt-select prompt-select-secondary" id="promptSelect" title="Optionally prepend an LLM prompt template to copied text">
               <option value="">No prompt</option>
-              <option value="analyze">Analyze best practices</option>
-              <option value="document">Generate documentation</option>
-              <option value="optimize">Suggest optimizations</option>
-              <option value="explain">Explain in plain language</option>
+              <option value="analyze">+ Analyze best practices</option>
+              <option value="document">+ Generate documentation</option>
+              <option value="optimize">+ Suggest optimizations</option>
+              <option value="explain">+ Explain in plain language</option>
             </select>
           </div>
           <div style="display:flex;gap:6px;align-items:center;justify-content:space-between;">

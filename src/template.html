@@ -5,23 +5,49 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:;">
 <title>Semantic Model Explorer</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='12'%20fill='%230f172a'/%3E%3Crect%20x='6'%20y='6'%20width='52'%20height='52'%20rx='10'%20fill='%2360c0a0'/%3E%3Ctext%20x='32'%20y='41'%20font-size='24'%20text-anchor='middle'%20fill='%230b1020'%20font-family='Arial,sans-serif'%20font-weight='700'%3ESM%3C/text%3E%3C/svg%3E">
 <style>
 {{STYLES}}
 </style>
 </head>
 <body>
 
-<!-- Drop Zone -->
-<div class="drop-zone-wrap" id="dropZoneWrap">
-  <div class="drop-zone" id="dropZone">
-    <h2>Drop a Power BI file here</h2>
-    <p>Explore the semantic model, copy everything for an LLM</p>
-    <div class="file-types">.pbix &nbsp; .pbit &nbsp; .pbip &nbsp; .bim</div>
-    <label class="browse-btn">
-      Browse Files
-      <input type="file" id="fileInput" multiple accept=".pbix,.pbit,.bim,.zip">
-    </label>
-    <div class="privacy-note">Runs locally in your browser. Your files never leave your machine.</div>
+<!-- Landing Page -->
+<div class="landing-wrap" id="dropZoneWrap">
+  <div class="landing-container">
+    <header class="landing-header">
+      <div class="logo">
+        <div class="logo-icon">SM</div>
+        <div><h1>Semantic Model Explorer</h1><div class="landing-subtitle">Explore Power BI semantic models &amp; copy as LLM-ready Markdown</div></div>
+      </div>
+      <div class="privacy-badge">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        100% local, no network needed
+      </div>
+    </header>
+
+    <div class="drop-zone" id="dropZone">
+      <div class="drop-zone-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="32" height="32"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      </div>
+      <h2>Drop your files here</h2>
+      <p>Drag a Power BI file or browse to select one</p>
+      <div class="file-types">
+        <span class="file-type-badge">.pbix</span>
+        <span class="file-type-badge">.pbit</span>
+        <span class="file-type-badge">.bim</span>
+        <span class="file-type-badge">.zip</span>
+      </div>
+      <label class="browse-btn">
+        Browse Files
+        <input type="file" id="fileInput" multiple accept=".pbix,.pbit,.bim,.zip">
+      </label>
+    </div>
+
+    <div class="footer-note">
+      <div>Files never leave your browser. You can also download this page as <code>semantic-model-explorer.html</code> and use it offline.</div>
+      <div>Built with JSZip, Cytoscape.js, and XPress9.</div>
+    </div>
   </div>
 </div>
 
@@ -47,12 +73,13 @@
     </div>
     <div class="header-actions">
       <span class="token-badge" id="tokenBadge"></span>
-      <select class="prompt-select" id="promptSelectHeader" style="width:auto;padding:4px 8px;">
-        <option value="">Copy All</option>
-        <option value="analyze">+ Analyze prompt</option>
-        <option value="document">+ Document prompt</option>
-        <option value="optimize">+ Optimize prompt</option>
-        <option value="explain">+ Explain prompt</option>
+      <span class="prompt-label">LLM prompt:</span>
+      <select class="prompt-select prompt-select-secondary" id="promptSelectHeader" title="Optionally prepend an LLM prompt template to copied text">
+        <option value="">No prompt</option>
+        <option value="analyze">+ Analyze best practices</option>
+        <option value="document">+ Generate documentation</option>
+        <option value="optimize">+ Suggest optimizations</option>
+        <option value="explain">+ Explain in plain language</option>
       </select>
       <button class="btn btn-primary" id="copyAllBtn">Copy All</button>
       <span class="new-file-link" id="newFileBtn">New File</span>
@@ -82,12 +109,13 @@
         <div class="tree-scroll" id="treeScroll"></div>
         <div class="tree-footer">
           <div style="display:flex;gap:6px;align-items:center;">
-            <select class="prompt-select" id="promptSelect">
+            <span class="prompt-label">LLM prompt:</span>
+          <select class="prompt-select prompt-select-secondary" id="promptSelect" title="Optionally prepend an LLM prompt template to copied text">
               <option value="">No prompt</option>
-              <option value="analyze">Analyze best practices</option>
-              <option value="document">Generate documentation</option>
-              <option value="optimize">Suggest optimizations</option>
-              <option value="explain">Explain in plain language</option>
+              <option value="analyze">+ Analyze best practices</option>
+              <option value="document">+ Generate documentation</option>
+              <option value="optimize">+ Suggest optimizations</option>
+              <option value="explain">+ Explain in plain language</option>
             </select>
           </div>
           <div style="display:flex;gap:6px;align-items:center;justify-content:space-between;">
