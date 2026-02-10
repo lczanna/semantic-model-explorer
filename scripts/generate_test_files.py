@@ -530,6 +530,196 @@ relationship Sales_Date_Inactive
     return tmdl_dir, zip_path
 
 
+def generate_edge_case_files(output_dir):
+    """Generate edge case test files for comprehensive testing."""
+
+    # 1. Empty model (no tables)
+    empty_model = {
+        "name": "Empty Model",
+        "compatibilityLevel": 1604,
+        "model": {"tables": []},
+    }
+    path = os.path.join(output_dir, "edge-empty-model.bim")
+    with open(path, "w") as f:
+        json.dump(empty_model, f)
+    print(f"Generated {path}")
+
+    # 2. Model with special characters in names
+    special_model = {
+        "name": "Special <Characters> & \"Quotes\"",
+        "compatibilityLevel": 1604,
+        "model": {
+            "tables": [
+                {
+                    "name": "Table with Spaces & Symbols!",
+                    "columns": [
+                        {"name": "Column <html>", "dataType": "string", "sourceColumn": "x"},
+                        {"name": "Column \"quoted\"", "dataType": "int64", "sourceColumn": "y"},
+                        {"name": "Col|pipe|bar", "dataType": "string", "sourceColumn": "z"},
+                        {"name": "Unicode\u00e9\u00e8\u00fc\u00f1", "dataType": "string", "sourceColumn": "u"},
+                    ],
+                    "measures": [
+                        {
+                            "name": "Measure with <script>alert(1)</script>",
+                            "expression": "1+1",
+                        },
+                        {
+                            "name": "Backtick`measure`",
+                            "expression": 'CALCULATE([Total], FILTER(\'Table with Spaces & Symbols!\'[Column <html>], TRUE()))',
+                        },
+                    ],
+                    "partitions": [{"name": "p", "source": {"type": "m", "expression": "Source"}}],
+                },
+                {
+                    "name": "Normal Table",
+                    "columns": [
+                        {"name": "ID", "dataType": "int64", "sourceColumn": "ID"},
+                    ],
+                    "partitions": [{"name": "p", "source": {"type": "m", "expression": "Source"}}],
+                },
+            ],
+            "relationships": [
+                {
+                    "name": "r1",
+                    "fromTable": "Table with Spaces & Symbols!",
+                    "fromColumn": "Column <html>",
+                    "toTable": "Normal Table",
+                    "toColumn": "ID",
+                },
+            ],
+        },
+    }
+    path = os.path.join(output_dir, "edge-special-chars.bim")
+    with open(path, "w") as f:
+        json.dump(special_model, f)
+    print(f"Generated {path}")
+
+    # 3. Model with no measures
+    no_measures = {
+        "name": "No Measures Model",
+        "compatibilityLevel": 1604,
+        "model": {
+            "tables": [
+                {
+                    "name": "Data",
+                    "columns": [
+                        {"name": "ID", "dataType": "int64", "sourceColumn": "ID"},
+                        {"name": "Name", "dataType": "string", "sourceColumn": "Name"},
+                    ],
+                    "partitions": [{"name": "p", "source": {"type": "m", "expression": "Source"}}],
+                },
+            ],
+        },
+    }
+    path = os.path.join(output_dir, "edge-no-measures.bim")
+    with open(path, "w") as f:
+        json.dump(no_measures, f)
+    print(f"Generated {path}")
+
+    # 4. Model with only hidden items
+    hidden_model = {
+        "name": "All Hidden",
+        "compatibilityLevel": 1604,
+        "model": {
+            "tables": [
+                {
+                    "name": "HiddenTable",
+                    "isHidden": True,
+                    "columns": [
+                        {"name": "HiddenCol", "dataType": "int64", "sourceColumn": "x", "isHidden": True},
+                    ],
+                    "measures": [
+                        {"name": "HiddenMeasure", "expression": "1", "isHidden": True},
+                    ],
+                    "partitions": [{"name": "p", "source": {"type": "m", "expression": "Source"}}],
+                },
+            ],
+        },
+    }
+    path = os.path.join(output_dir, "edge-all-hidden.bim")
+    with open(path, "w") as f:
+        json.dump(hidden_model, f)
+    print(f"Generated {path}")
+
+    # 5. Single-table model (no relationships)
+    single = {
+        "name": "Single Table",
+        "compatibilityLevel": 1604,
+        "model": {
+            "tables": [
+                {
+                    "name": "OnlyTable",
+                    "columns": [{"name": "Val", "dataType": "string", "sourceColumn": "Val"}],
+                    "measures": [{"name": "Count", "expression": "COUNTROWS(OnlyTable)"}],
+                    "partitions": [{"name": "p", "source": {"type": "m", "expression": "Source"}}],
+                },
+            ],
+        },
+    }
+    path = os.path.join(output_dir, "edge-single-table.bim")
+    with open(path, "w") as f:
+        json.dump(single_model, f) if False else json.dump(single, f)
+    print(f"Generated {path}")
+
+    # 6. Very long names
+    long_model = {
+        "name": "Long" * 50,
+        "compatibilityLevel": 1604,
+        "model": {
+            "tables": [
+                {
+                    "name": "T" * 200,
+                    "columns": [
+                        {"name": "C" * 200, "dataType": "string", "sourceColumn": "x"},
+                    ],
+                    "measures": [
+                        {"name": "M" * 200, "expression": "SUM(" + "T" * 200 + "[" + "C" * 200 + "])"},
+                    ],
+                    "partitions": [{"name": "p", "source": {"type": "m", "expression": "Source"}}],
+                },
+            ],
+        },
+    }
+    path = os.path.join(output_dir, "edge-long-names.bim")
+    with open(path, "w") as f:
+        json.dump(long_model, f)
+    print(f"Generated {path}")
+
+    # 7. Many tables (wide model)
+    many_tables = {
+        "name": "Wide Model",
+        "compatibilityLevel": 1604,
+        "model": {
+            "tables": [
+                {
+                    "name": f"Table_{i:03d}",
+                    "columns": [
+                        {"name": f"Col_{j}", "dataType": "string", "sourceColumn": f"col{j}"}
+                        for j in range(5)
+                    ],
+                    "measures": [{"name": f"M_{i}", "expression": f"COUNTROWS(Table_{i:03d})"}],
+                    "partitions": [{"name": "p", "source": {"type": "m", "expression": "Source"}}],
+                }
+                for i in range(30)
+            ],
+            "relationships": [
+                {
+                    "name": f"r_{i}",
+                    "fromTable": f"Table_{i+1:03d}",
+                    "fromColumn": "Col_0",
+                    "toTable": f"Table_{i:03d}",
+                    "toColumn": "Col_0",
+                }
+                for i in range(29)
+            ],
+        },
+    }
+    path = os.path.join(output_dir, "edge-many-tables.bim")
+    with open(path, "w") as f:
+        json.dump(many_tables, f)
+    print(f"Generated {path}")
+
+
 if __name__ == "__main__":
     output_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "test-files")
     os.makedirs(output_dir, exist_ok=True)
@@ -537,4 +727,5 @@ if __name__ == "__main__":
     generate_bim(output_dir)
     generate_pbit(output_dir)
     generate_tmdl(output_dir)
+    generate_edge_case_files(output_dir)
     print("\nAll test files generated successfully!")

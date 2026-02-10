@@ -2191,6 +2191,7 @@ function initEvents() {
     appState.statsCache = null;
     $('includeStatsHeader').checked = false;
     $('includeStats').checked = false;
+    if (typeof resetDataTab === 'function') resetDataTab();
   });
 
   // Diagram controls

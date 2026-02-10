@@ -120,6 +120,28 @@ function exportParquet(tableName, tableData) {
 
 let _dataTabInitialized = false;
 
+function resetDataTab() {
+  _pbixDataModel = null;
+  _currentTableData = null;
+  _currentTableName = null;
+  _extractionAborted = true;
+
+  var listEl = document.getElementById('dataTableList');
+  if (listEl) listEl.innerHTML = '';
+  var previewEl = document.getElementById('dataPreview');
+  if (previewEl) previewEl.innerHTML = '<div class="detail-empty">Select a table to preview data</div>';
+  var nameEl = document.getElementById('dataTableName');
+  if (nameEl) nameEl.textContent = '';
+  var countEl = document.getElementById('dataRowCount');
+  if (countEl) countEl.textContent = '';
+  var statusEl = document.getElementById('dataStatus');
+  if (statusEl) statusEl.textContent = '';
+  var csvBtn = document.getElementById('exportCsvBtn');
+  if (csvBtn) csvBtn.disabled = true;
+  var parquetBtn = document.getElementById('exportParquetBtn');
+  if (parquetBtn) parquetBtn.disabled = true;
+}
+
 function initDataTab(pbixDataModel) {
   _pbixDataModel = pbixDataModel;
   _currentTableData = null;

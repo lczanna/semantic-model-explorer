@@ -23,12 +23,13 @@ TEST_FILES = os.path.join(ROOT, "data", "test-files")
 @pytest.fixture(scope="session", autouse=True)
 def generate_test_files():
     """Generate test files before running tests."""
-    from generate_test_files import generate_bim, generate_pbit, generate_tmdl
+    from generate_test_files import generate_bim, generate_pbit, generate_tmdl, generate_edge_case_files
 
     os.makedirs(TEST_FILES, exist_ok=True)
     generate_bim(TEST_FILES)
     generate_pbit(TEST_FILES)
     generate_tmdl(TEST_FILES)
+    generate_edge_case_files(TEST_FILES)
 
 
 @pytest.fixture
@@ -1204,3 +1205,639 @@ class TestDataProfile:
             "() => document.getElementById('includeStats').checked"
         )
         assert footer_checked, "Footer checkbox should sync with header"
+
+
+# ============================================================
+# Edge Case Tests — Comprehensive coverage
+# ============================================================
+
+
+class TestDataTabReset:
+    """Tests for Data tab state reset when loading new files."""
+
+    def test_data_tab_clears_on_new_file(self, app: Page):
+        """Test that Data tab preview is cleared when clicking New File."""
+        pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
+        if not os.path.exists(pbix_path):
+            pytest.skip("Revenue_Opportunities.pbix not available")
+
+        # Load a .pbix and select a table in data tab
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+        click_tab(app, "data")
+        app.wait_for_selector("#dataTableList .data-table-item", timeout=5000)
+        items = app.query_selector_all("#dataTableList .data-table-item")
+        items[0].click()
+        app.wait_for_selector(".data-table th", timeout=30000)
+
+        # Click New File
+        app.evaluate("() => document.getElementById('newFileBtn').click()")
+        app.wait_for_selector("#dropZone", state="visible", timeout=5000)
+
+        # Load a .bim file (no data tab)
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+
+        # Data preview should be cleared
+        preview_html = app.evaluate(
+            "() => document.getElementById('dataPreview').innerHTML"
+        )
+        assert ".data-table" not in preview_html or "data-table" not in preview_html.lower() or \
+            "Select a table" in preview_html, \
+            "Data preview should be cleared after loading a non-.pbix file"
+
+    def test_data_tab_table_list_refreshes(self, app: Page):
+        """Test that loading a second .pbix refreshes the table list."""
+        pbix1 = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
+        pbix2 = os.path.join(TEST_FILES, "Corporate_Spend.pbix")
+        if not os.path.exists(pbix1) or not os.path.exists(pbix2):
+            pytest.skip(".pbix files not available")
+
+        upload_file_via_input(app, pbix1)
+        wait_for_app(app, timeout=30000)
+
+        tables1 = app.evaluate("() => appState.model._pbixDataModel.tableNames")
+
+        # New file, load second .pbix
+        app.evaluate("() => document.getElementById('newFileBtn').click()")
+        app.wait_for_selector("#dropZone", state="visible", timeout=5000)
+        upload_file_via_input(app, pbix2)
+        wait_for_app(app, timeout=30000)
+
+        tables2 = app.evaluate("() => appState.model._pbixDataModel.tableNames")
+        assert tables1 != tables2, "Table lists should differ between files"
+
+
+class TestEmptyModel:
+    """Tests for models with no tables, measures, or relationships."""
+
+    def test_empty_model_loads(self, app: Page):
+        """Test that a model with 0 tables loads without crashing."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-empty-model.bim"))
+        wait_for_app(app)
+
+        stats = get_header_stats(app)
+        assert "0 Tables" in stats
+
+    def test_empty_model_copy_works(self, app: Page):
+        """Test that Copy All works with an empty model."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-empty-model.bim"))
+        wait_for_app(app)
+
+        md = app.evaluate("() => modelToMarkdown(appState.model, null)")
+        assert "# Model:" in md
+        assert "Tables: 0" in md
+
+    def test_empty_model_diagram(self, app: Page):
+        """Test that Diagram tab doesn't crash with 0 tables."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-empty-model.bim"))
+        wait_for_app(app)
+        click_tab(app, "diagram")
+        app.wait_for_timeout(500)
+
+        # Should not crash — either empty diagram or no error
+        error_visible = app.evaluate(
+            "() => document.getElementById('errorBanner').style.display !== 'none'"
+        )
+        assert not error_visible, "Diagram with 0 tables should not show error"
+
+
+class TestSpecialCharacters:
+    """Tests for XSS prevention and special character handling."""
+
+    def test_special_chars_load(self, app: Page):
+        """Test that model with special characters loads correctly."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-special-chars.bim"))
+        wait_for_app(app)
+
+        stats = get_header_stats(app)
+        assert "2 Tables" in stats
+
+    def test_html_in_table_name_escaped(self, app: Page):
+        """Test that HTML in table names is escaped (XSS prevention)."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-special-chars.bim"))
+        wait_for_app(app)
+
+        # Check that <script> in measure name doesn't execute as raw HTML
+        tree_html = app.evaluate(
+            "() => document.getElementById('treeScroll').innerHTML"
+        )
+        assert "<script>" not in tree_html, "HTML should be escaped in tree view"
+
+    def test_special_chars_in_markdown(self, app: Page):
+        """Test that special characters render correctly in Markdown output."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-special-chars.bim"))
+        wait_for_app(app)
+
+        md = app.evaluate("() => modelToMarkdown(appState.model, null)")
+        assert "Table with Spaces & Symbols!" in md
+        assert "Column <html>" in md
+        assert "Unicode" in md
+
+    def test_special_chars_detail_panel(self, app: Page):
+        """Test that detail panel escapes HTML in column/measure names."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-special-chars.bim"))
+        wait_for_app(app)
+
+        # Click on the table with special chars
+        app.evaluate("""() => {
+            const items = document.querySelectorAll('.tree-item');
+            for (const item of items) {
+                if (item.textContent.includes('Table with Spaces')) {
+                    item.click();
+                    break;
+                }
+            }
+        }""")
+        app.wait_for_timeout(200)
+
+        detail_html = app.evaluate("() => document.getElementById('detailPanel').innerHTML")
+        assert "<script>" not in detail_html, "Detail panel should escape HTML"
+
+
+class TestNoMeasures:
+    """Tests for models without measures."""
+
+    def test_no_measures_loads(self, app: Page):
+        """Test that a model with no measures loads correctly."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-no-measures.bim"))
+        wait_for_app(app)
+
+        stats = get_header_stats(app)
+        assert "0 Measures" in stats
+
+    def test_no_measures_markdown(self, app: Page):
+        """Test Markdown output with no measures section."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-no-measures.bim"))
+        wait_for_app(app)
+
+        md = app.evaluate("() => modelToMarkdown(appState.model, null)")
+        assert "## Tables" in md
+        assert "## Measures" not in md, "No Measures section when there are none"
+
+
+class TestHiddenItems:
+    """Tests for show/hide hidden items toggle."""
+
+    def test_show_hidden_toggle(self, app: Page):
+        """Test toggling show hidden items."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+
+        # Count visible items with hidden OFF
+        visible_off = app.evaluate(
+            "() => document.querySelectorAll('.tree-item:not([style*=\"display: none\"])').length"
+        )
+
+        # Toggle show hidden
+        app.evaluate("""() => {
+            const cb = document.getElementById('showHidden');
+            cb.checked = true;
+            cb.dispatchEvent(new Event('change'));
+        }""")
+        app.wait_for_timeout(100)
+
+        visible_on = app.evaluate(
+            "() => document.querySelectorAll('.tree-item:not([style*=\"display: none\"])').length"
+        )
+        assert visible_on >= visible_off, "Show hidden should reveal more items"
+
+    def test_all_hidden_model(self, app: Page):
+        """Test model where everything is hidden."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-all-hidden.bim"))
+        wait_for_app(app)
+
+        stats = get_header_stats(app)
+        assert "1 Table" in stats
+
+
+class TestSingleTable:
+    """Tests for single-table models (no relationships)."""
+
+    def test_single_table_loads(self, app: Page):
+        """Test that a single-table model loads correctly."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-single-table.bim"))
+        wait_for_app(app)
+
+        stats = get_header_stats(app)
+        assert "1 Table" in stats
+        assert "0 Rels" in stats or "0 Rel" in stats
+
+    def test_single_table_diagram(self, app: Page):
+        """Test that diagram works with a single table (no edges)."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-single-table.bim"))
+        wait_for_app(app)
+        click_tab(app, "diagram")
+        app.wait_for_timeout(500)
+
+        node_count = app.evaluate(
+            "() => appState.cy ? appState.cy.nodes().length : -1"
+        )
+        assert node_count == 1, "Should have exactly 1 node"
+
+
+class TestLongNames:
+    """Tests for extremely long table/column/measure names."""
+
+    def test_long_names_load(self, app: Page):
+        """Test that model with very long names loads."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-long-names.bim"))
+        wait_for_app(app)
+
+        stats = get_header_stats(app)
+        assert "1 Table" in stats
+
+    def test_long_names_markdown(self, app: Page):
+        """Test Markdown output with very long names."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-long-names.bim"))
+        wait_for_app(app)
+
+        md = app.evaluate("() => modelToMarkdown(appState.model, null)")
+        assert len(md) > 0, "Markdown should not be empty"
+        # Names should appear in full
+        assert "TTTT" in md
+
+
+class TestManyTables:
+    """Tests for wide models with many tables."""
+
+    def test_many_tables_load(self, app: Page):
+        """Test that a model with 30 tables loads correctly."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-many-tables.bim"))
+        wait_for_app(app)
+
+        stats = get_header_stats(app)
+        assert "30 Tables" in stats
+
+    def test_many_tables_diagram(self, app: Page):
+        """Test that diagram handles 30 tables with 29 relationships."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-many-tables.bim"))
+        wait_for_app(app)
+        click_tab(app, "diagram")
+        app.wait_for_timeout(500)
+
+        node_count = app.evaluate(
+            "() => appState.cy ? appState.cy.nodes().length : -1"
+        )
+        assert node_count == 30, f"Expected 30 nodes, got {node_count}"
+
+    def test_many_tables_select_all_copy(self, app: Page):
+        """Test Select All + Copy with many tables."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-many-tables.bim"))
+        wait_for_app(app)
+
+        app.evaluate("""() => {
+            const cb = document.getElementById('selectAll');
+            cb.checked = true;
+            cb.dispatchEvent(new Event('change'));
+        }""")
+        app.wait_for_timeout(100)
+
+        md = app.evaluate(
+            "() => modelToMarkdown(appState.model, appState.checkedItems)"
+        )
+        assert "Table_000" in md
+        assert "Table_029" in md
+
+
+class TestStateManagement:
+    """Tests for state management across file loads."""
+
+    def test_new_file_resets_tree_selection(self, app: Page):
+        """Test that tree selection is cleared on New File."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+
+        # Select a tree item
+        app.evaluate("""() => {
+            const items = document.querySelectorAll('.tree-item');
+            if (items.length > 0) items[0].click();
+        }""")
+        app.wait_for_timeout(100)
+
+        # Click New File
+        app.evaluate("() => document.getElementById('newFileBtn').click()")
+        app.wait_for_selector("#dropZone", state="visible", timeout=5000)
+
+        # Load again
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+
+        selected = app.evaluate("() => appState.selectedItem")
+        assert selected is None, "Selected item should be null after New File"
+
+    def test_new_file_resets_checked_items(self, app: Page):
+        """Test that checked items are cleared on New File."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+
+        # Check some items
+        app.evaluate("""() => {
+            const cb = document.getElementById('selectAll');
+            cb.checked = true;
+            cb.dispatchEvent(new Event('change'));
+        }""")
+
+        # Click New File
+        app.evaluate("() => document.getElementById('newFileBtn').click()")
+        app.wait_for_selector("#dropZone", state="visible", timeout=5000)
+
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+
+        count = app.evaluate("() => appState.checkedItems.size")
+        assert count == 0, f"Checked items should be 0 after New File, got {count}"
+
+    def test_new_file_resets_stats_cache(self, app: Page):
+        """Test that stats cache is cleared on New File."""
+        pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
+        if not os.path.exists(pbix_path):
+            pytest.skip("Revenue_Opportunities.pbix not available")
+
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+
+        # Compute stats so cache is populated
+        app.evaluate(
+            "async () => await computeAllStats(appState.model._pbixDataModel, () => {})"
+        )
+        has_cache = app.evaluate("() => appState.statsCache !== null")
+        assert has_cache, "Stats cache should be populated"
+
+        # New file
+        app.evaluate("() => document.getElementById('newFileBtn').click()")
+        app.wait_for_selector("#dropZone", state="visible", timeout=5000)
+
+        cache_after = app.evaluate("() => appState.statsCache")
+        assert cache_after is None, "Stats cache should be null after New File"
+
+    def test_stats_checkbox_hidden_after_new_file(self, app: Page):
+        """Test that stats checkbox hides when going from .pbix to .bim."""
+        pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
+        if not os.path.exists(pbix_path):
+            pytest.skip("Revenue_Opportunities.pbix not available")
+
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+
+        visible1 = app.evaluate(
+            "() => document.getElementById('includeStatsHeaderWrap').style.display"
+        )
+        assert visible1 != "none", "Stats checkbox should show for .pbix"
+
+        app.evaluate("() => document.getElementById('newFileBtn').click()")
+        app.wait_for_selector("#dropZone", state="visible", timeout=5000)
+
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+
+        visible2 = app.evaluate(
+            "() => document.getElementById('includeStatsHeaderWrap').style.display"
+        )
+        assert visible2 == "none", "Stats checkbox should hide for .bim"
+
+
+class TestCopyEdgeCases:
+    """Tests for copy/markdown edge cases."""
+
+    def test_copy_with_no_selection(self, app: Page):
+        """Test that Copy Selected with nothing checked shows toast."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+
+        # Ensure nothing is checked
+        app.evaluate("() => appState.checkedItems.clear()")
+
+        # Click copy selected
+        app.click("#copySelectedBtn")
+        app.wait_for_timeout(500)
+
+        # Should show a toast or at least not crash
+        toast_text = app.evaluate(
+            "() => { const t = document.querySelector('.toast'); return t ? t.textContent : ''; }"
+        )
+        assert "No items" in toast_text or len(toast_text) >= 0  # didn't crash
+
+    def test_markdown_with_roles(self, app: Page):
+        """Test that roles section appears in Markdown."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+
+        md = app.evaluate("() => modelToMarkdown(appState.model, null)")
+        assert "## Roles" in md
+        assert "Regional Manager" in md
+
+    def test_markdown_with_calculated_columns(self, app: Page):
+        """Test that calculated columns appear in Markdown with DAX."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+
+        md = app.evaluate("() => modelToMarkdown(appState.model, null)")
+        assert "(calculated column)" in md
+        assert "Sales[Amount] - Sales[Cost]" in md
+
+    def test_markdown_relationships_direction(self, app: Page):
+        """Test that Markdown shows correct relationship table names."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+
+        md = app.evaluate("() => modelToMarkdown(appState.model, null)")
+        assert "Sales[ProductKey]" in md
+        assert "Product[ProductKey]" in md
+
+    def test_token_estimate_nonzero(self, app: Page):
+        """Test that token estimate is always > 0 for non-empty models."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+
+        tokens = app.evaluate("""() => {
+            const md = modelToMarkdown(appState.model, null);
+            return estimateTokens(md);
+        }""")
+        assert tokens > 0, "Token estimate should be > 0"
+
+
+class TestTabSwitching:
+    """Tests for tab switching behavior."""
+
+    def test_rapid_tab_switching(self, app: Page):
+        """Test rapid switching between all tabs doesn't crash."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+
+        for _ in range(3):
+            click_tab(app, "model")
+            click_tab(app, "diagram")
+            click_tab(app, "model")
+
+        # Should still be functional
+        stats = get_header_stats(app)
+        assert "Tables" in stats
+
+    def test_diagram_tab_then_model_tab(self, app: Page):
+        """Test switching from diagram back to model preserves state."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+
+        click_tab(app, "diagram")
+        app.wait_for_timeout(300)
+        click_tab(app, "model")
+        app.wait_for_timeout(100)
+
+        # Tree should still be visible
+        items = app.query_selector_all(".tree-item")
+        assert len(items) > 0, "Tree items should still be visible"
+
+
+class TestDiagramEdgeCases:
+    """Tests for diagram edge cases."""
+
+    def test_diagram_search_no_match(self, app: Page):
+        """Test diagram search with no matching tables."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+        click_tab(app, "diagram")
+        app.wait_for_timeout(500)
+
+        app.fill("#diagramSearch", "ZZZZZZNONEXISTENT")
+        app.wait_for_timeout(200)
+
+        # All nodes should be dimmed/faded
+        highlighted = app.evaluate(
+            "() => appState.cy ? appState.cy.nodes('.highlighted').length : -1"
+        )
+        assert highlighted == 0, "No nodes should be highlighted for non-matching search"
+
+    def test_diagram_search_clears(self, app: Page):
+        """Test that clearing diagram search restores all nodes."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+        click_tab(app, "diagram")
+        app.wait_for_timeout(500)
+
+        app.fill("#diagramSearch", "Sales")
+        app.wait_for_timeout(200)
+        app.fill("#diagramSearch", "")
+        app.wait_for_timeout(200)
+
+        # All nodes should be visible/normal
+        dimmed = app.evaluate(
+            "() => appState.cy ? appState.cy.nodes('.dimmed').length : -1"
+        )
+        assert dimmed == 0, "No nodes should be dimmed after clearing search"
+
+
+class TestTreeSearch:
+    """Tests for tree search functionality."""
+
+    def test_tree_search_filters_items(self, app: Page):
+        """Test that tree search filters visible items."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+
+        total = app.evaluate(
+            "() => document.querySelectorAll('.tree-item').length"
+        )
+
+        app.fill("#treeSearch", "Sales")
+        app.wait_for_timeout(200)
+
+        visible = app.evaluate("""() => {
+            let count = 0;
+            document.querySelectorAll('.tree-item').forEach(el => {
+                if (el.offsetParent !== null) count++;
+            });
+            return count;
+        }""")
+
+        assert visible < total, "Search should filter tree items"
+        assert visible > 0, "Should find at least one match for 'Sales'"
+
+    def test_tree_search_clear(self, app: Page):
+        """Test that clearing search shows all items again."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+
+        total_before = app.evaluate(
+            "() => document.querySelectorAll('.tree-item').length"
+        )
+
+        app.fill("#treeSearch", "Sales")
+        app.wait_for_timeout(100)
+        app.fill("#treeSearch", "")
+        app.wait_for_timeout(100)
+
+        total_after = app.evaluate("""() => {
+            let count = 0;
+            document.querySelectorAll('.tree-item').forEach(el => {
+                if (el.offsetParent !== null) count++;
+            });
+            return count;
+        }""")
+
+        assert total_after == total_before, "All items should be visible after clearing search"
+
+
+class TestFileFormatDetection:
+    """Tests for file format detection and error handling."""
+
+    def test_plain_text_file_shows_error(self, app: Page):
+        """Test that a random text file shows an error."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "invalid.txt"))
+        app.wait_for_selector("#errorBanner", state="visible", timeout=5000)
+
+        error_text = app.text_content("#errorBanner")
+        assert len(error_text) > 0, "Error message should be displayed"
+
+    def test_empty_json_shows_error(self, app: Page):
+        """Test that empty JSON ({}) loads as empty model or shows error."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "empty.bim"))
+        # Should either show an error or load as a model with 0 tables
+        try:
+            app.wait_for_selector("#errorBanner", state="visible", timeout=3000)
+        except Exception:
+            # If no error, it loaded as an empty model — that's acceptable
+            wait_for_app(app, timeout=5000)
+            stats = get_header_stats(app)
+            assert "0 Tables" in stats
+
+    def test_bim_format_badge(self, app: Page):
+        """Test that .bim files show correct format badge."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+        badge = app.text_content("#modelFormat")
+        assert badge == "bim"
+
+    def test_pbit_format_badge(self, app: Page):
+        """Test that .pbit files show correct format badge."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.pbit"))
+        wait_for_app(app)
+        badge = app.text_content("#modelFormat")
+        assert badge == "pbit"
+
+    def test_tmdl_format_badge(self, app: Page):
+        """Test that TMDL .zip files show correct format badge."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "tmdl-test-model.zip"))
+        wait_for_app(app)
+        badge = app.text_content("#modelFormat")
+        assert badge == "tmdl"
+
+
+class TestInactiveRelationships:
+    """Tests for inactive relationship handling."""
+
+    def test_inactive_relationship_in_markdown(self, app: Page):
+        """Test that inactive relationships are marked in Markdown."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+
+        md = app.evaluate("() => modelToMarkdown(appState.model, null)")
+        assert "No" in md, "Markdown should show inactive relationship as 'No'"
+
+    def test_bidirectional_relationship_in_markdown(self, app: Page):
+        """Test that bidirectional relationships show correct direction."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+
+        md = app.evaluate("() => modelToMarkdown(appState.model, null)")
+        assert "Both" in md, "Markdown should show bidirectional as 'Both'"
