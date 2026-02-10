@@ -1928,6 +1928,7 @@ function renderDiagram(model) {
   cy.on('tap', function(evt) {
     if (evt.target === cy) {
       $('diagramSidePanel').classList.remove('open');
+      requestAnimationFrame(() => cy.resize());
     }
   });
 
@@ -1960,6 +1961,8 @@ function showDiagramSidePanel(table) {
 
   panel.innerHTML = html;
   panel.classList.add('open');
+  // Resize Cytoscape so it reflows around the newly visible panel
+  if (appState.cy) requestAnimationFrame(() => appState.cy.resize());
 }
 
 function showDiagramEdgePanel(data) {
@@ -1976,6 +1979,7 @@ function showDiagramEdgePanel(data) {
   html += `</dl>`;
   panel.innerHTML = html;
   panel.classList.add('open');
+  if (appState.cy) requestAnimationFrame(() => appState.cy.resize());
 }
 
 // ============================================================
