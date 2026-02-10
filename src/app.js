@@ -9,6 +9,7 @@ const appState = {
   errors: [],
   cy: null, // Cytoscape instance
   pbixDataModel: null, // VertiPaq data model for Data tab (set after async init)
+  statsCache: null, // Map<tableName, columnStats[]> — cached after first computation
 };
 
 const PROMPTS = {
@@ -830,6 +831,9 @@ async function parsePbix(arrayBuffer) {
       },
       getTableStreaming(tableName, onProgress) {
         return extractTableDataStreaming(tableName, schema, fileCache, onProgress);
+      },
+      getTableStats(tableName, onProgress) {
+        return extractTableStatsStreaming(tableName, schema, fileCache, onProgress);
       }
     };
 
@@ -1111,11 +1115,129 @@ async function flattenEntries(items) {
 }
 
 // ============================================================
+// DATA PROFILE — Column statistics for LLM copy
+// ============================================================
+
+/**
+ * Compute statistics for a single column's data array.
+ * Designed for streaming: call this on one column at a time, then release the data.
+ * @param {string} name - Column name
+ * @param {any[]} data - Column values
+ * @returns {Object} { name, distinct, nulls, rowCount, min?, max?, avg?, top? }
+ */
+function _computeColumnStats(name, data) {
+  const stat = { name, distinct: 0, nulls: 0, rowCount: data.length };
+
+  let nullCount = 0;
+  const seen = new Set();
+  const freq = new Map();
+  let numCount = 0, numSum = 0, numMin = Infinity, numMax = -Infinity;
+  let dateMin = null, dateMax = null;
+  let isNumeric = false, isDate = false;
+
+  for (let r = 0; r < data.length; r++) {
+    const v = data[r];
+    if (v == null) { nullCount++; continue; }
+
+    if (typeof v === 'number' && isFinite(v)) {
+      isNumeric = true;
+      numCount++;
+      numSum += v;
+      if (v < numMin) numMin = v;
+      if (v > numMax) numMax = v;
+    } else if (v instanceof Date) {
+      isDate = true;
+      if (!dateMin || v < dateMin) dateMin = v;
+      if (!dateMax || v > dateMax) dateMax = v;
+    }
+
+    // Track frequency for top values (cap map size to avoid memory blow-up)
+    const key = v instanceof Date ? v.getTime() : v;
+    seen.add(key);
+    if (freq.size < 10000) {
+      freq.set(key, (freq.get(key) || 0) + 1);
+    }
+  }
+
+  stat.distinct = seen.size;
+  stat.nulls = nullCount;
+
+  if (isNumeric && numCount > 0) {
+    stat.min = numMin;
+    stat.max = numMax;
+    stat.avg = Math.round((numSum / numCount) * 100) / 100;
+  }
+
+  if (isDate) {
+    stat.min = dateMin;
+    stat.max = dateMax;
+  }
+
+  // Top values: up to 5 most frequent (for string/low-cardinality columns)
+  if (!isNumeric && !isDate && freq.size > 0 && freq.size <= 1000) {
+    const sorted = [...freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+    stat.top = sorted.map(([val, count]) => ({
+      value: String(val),
+      count,
+    }));
+  }
+
+  return stat;
+}
+
+/**
+ * Compute stats for all tables. Memory-efficient: extracts one column at a time
+ * via getTableStats(), computes stats, then releases column data before the next.
+ * Caches results in appState.statsCache.
+ *
+ * @param {Object} pbixDataModel
+ * @param {Function} onProgress - (tableIdx, totalTables, tableName) => void
+ * @returns {Promise<Map<string, Object[]>>}
+ */
+async function computeAllStats(pbixDataModel, onProgress) {
+  if (appState.statsCache) return appState.statsCache;
+
+  const statsMap = new Map();
+  const names = pbixDataModel.tableNames;
+
+  for (let i = 0; i < names.length; i++) {
+    const name = names[i];
+    if (onProgress) onProgress(i, names.length, name);
+
+    try {
+      const tableStats = await pbixDataModel.getTableStats(name, () => {});
+      if (tableStats) statsMap.set(name, tableStats);
+    } catch (e) {
+      // Skip tables that fail to extract
+    }
+    // Yield to event loop
+    await new Promise(r => setTimeout(r, 0));
+  }
+
+  appState.statsCache = statsMap;
+  return statsMap;
+}
+
+/**
+ * Format a stat value for display in markdown.
+ */
+function _formatStatVal(v) {
+  if (v instanceof Date) return v.toISOString().split('T')[0];
+  if (typeof v === 'number') {
+    if (Math.abs(v) >= 1e6) return v.toExponential(2);
+    if (Number.isInteger(v)) return v.toLocaleString();
+    return v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  }
+  return String(v);
+}
+
+// ============================================================
 // MARKDOWN EXPORT
 // ============================================================
 
-function modelToMarkdown(model, items) {
+function modelToMarkdown(model, items, statsMap) {
   // items: null = everything, or Set of item keys
+  // statsMap: null = no stats, or Map<tableName, columnStats[]>
   const lines = [];
   const all = !items;
 
@@ -1144,6 +1266,27 @@ function modelToMarkdown(model, items) {
           const hidden = c.isHidden ? 'Yes' : '';
           const calc = c.type === 'calculated' ? 'Yes' : '';
           lines.push(`| ${c.name} | ${c.dataType} | ${hidden} | ${calc} | ${c.formatString || ''} |`);
+        }
+      }
+
+      // Data profile (inline bullets, only when statsMap provided)
+      const tStats = statsMap ? statsMap.get(t.name) : null;
+      if (tStats && tStats.length > 0) {
+        const rowCount = tStats[0].rowCount || 0;
+        lines.push('');
+        lines.push(`**Data profile** (${formatNum(rowCount)} rows):`);
+        for (const s of tStats) {
+          let line = `- **${s.name}** -- ${formatNum(s.distinct)} distinct, ${formatNum(s.nulls)} nulls`;
+          if (s.avg !== undefined) {
+            line += `, avg: ${_formatStatVal(s.avg)}, range: ${_formatStatVal(s.min)} .. ${_formatStatVal(s.max)}`;
+          } else if (s.min !== undefined) {
+            line += `, range: ${_formatStatVal(s.min)} .. ${_formatStatVal(s.max)}`;
+          }
+          if (s.top && s.top.length > 0) {
+            const topStr = s.top.map(t => `${t.value} (${formatNum(t.count)})`).join(', ');
+            line += `, top: ${topStr}`;
+          }
+          lines.push(line);
         }
       }
 
@@ -1302,11 +1445,17 @@ function renderApp(model) {
   // Initialize Data tab if .pbix data model is available
   if (model._pbixDataModel && typeof initDataTab === 'function') {
     appState.pbixDataModel = model._pbixDataModel;
+    appState.statsCache = null; // clear stats cache for new file
     initDataTab(model._pbixDataModel);
+    // Show data profile checkboxes
+    $('includeStatsHeaderWrap').style.display = '';
+    $('includeStatsWrap').style.display = '';
   } else {
-    // Hide Data tab for non-pbix files
+    // Hide Data tab and stats checkboxes for non-pbix files
     const dataTabBtn = $('dataTabBtn');
     if (dataTabBtn) dataTabBtn.style.display = 'none';
+    $('includeStatsHeaderWrap').style.display = 'none';
+    $('includeStatsWrap').style.display = 'none';
   }
 }
 
@@ -1646,18 +1795,21 @@ function renderDiagram(model) {
     if (!fromExists || !toExists) continue;
 
     const card = cardinalityLabel(r.cardinality);
+    // Arrow direction: from dimension (one/toTable) → fact (many/fromTable)
     elements.push({
       group: 'edges',
       data: {
         id: `${r.fromTable}_${r.fromColumn}_${r.toTable}_${r.toColumn}`,
-        source: r.fromTable,
-        target: r.toTable,
-        label: `${r.fromColumn} → ${r.toColumn} (${card})`,
+        source: r.toTable,
+        target: r.fromTable,
+        label: `${r.toColumn} → ${r.fromColumn} (${card})`,
         cardinality: card,
         direction: r.crossFilterDirection,
         isActive: r.isActive,
         fromColumn: r.fromColumn,
         toColumn: r.toColumn,
+        fromTable: r.fromTable,
+        toTable: r.toTable,
       },
     });
   }
@@ -1812,10 +1964,12 @@ function showDiagramSidePanel(table) {
 
 function showDiagramEdgePanel(data) {
   const panel = $('diagramSidePanel');
-  let html = `<h3>${escHtml(data.source)} → ${escHtml(data.target)}</h3>`;
+  const fromT = data.fromTable || data.target;
+  const toT = data.toTable || data.source;
+  let html = `<h3>${escHtml(fromT)} → ${escHtml(toT)}</h3>`;
   html += `<dl class="detail-meta" style="margin-top:8px">`;
-  html += `<dt>From</dt><dd>${escHtml(data.source)}[${escHtml(data.fromColumn)}]</dd>`;
-  html += `<dt>To</dt><dd>${escHtml(data.target)}[${escHtml(data.toColumn)}]</dd>`;
+  html += `<dt>From (many)</dt><dd>${escHtml(fromT)}[${escHtml(data.fromColumn)}]</dd>`;
+  html += `<dt>To (one)</dt><dd>${escHtml(toT)}[${escHtml(data.toColumn)}]</dd>`;
   html += `<dt>Cardinality</dt><dd>${data.cardinality}</dd>`;
   html += `<dt>Direction</dt><dd>${data.direction === 'both' ? 'Both' : 'Single'}</dd>`;
   html += `<dt>Active</dt><dd>${data.isActive ? 'Yes' : 'No'}</dd>`;
@@ -1884,12 +2038,16 @@ function initEvents() {
     btn.classList.add('active');
     $('tab-' + tab).classList.add('active');
 
-    if (tab === 'diagram' && appState.model && !appState.cy) {
-      renderDiagram(appState.model);
-    }
-    if (tab === 'diagram' && appState.cy) {
-      // Resize
-      setTimeout(() => appState.cy.resize(), 50);
+    if (tab === 'diagram' && appState.model) {
+      // Delay render/resize until after browser has laid out the container
+      requestAnimationFrame(() => {
+        if (!appState.cy) {
+          renderDiagram(appState.model);
+        } else {
+          appState.cy.resize();
+          appState.cy.fit(null, 40);
+        }
+      });
     }
   });
 
@@ -1956,8 +2114,23 @@ function initEvents() {
   // Copy All
   $('copyAllBtn').addEventListener('click', async () => {
     if (!appState.model) return;
+    const includeStats = $('includeStatsHeader').checked && appState.pbixDataModel;
+    let statsMap = null;
+    if (includeStats) {
+      const btn = $('copyAllBtn');
+      btn.textContent = 'Computing stats...';
+      btn.disabled = true;
+      try {
+        statsMap = await computeAllStats(appState.pbixDataModel, (i, total, name) => {
+          btn.textContent = `Stats ${i + 1}/${total}...`;
+        });
+      } finally {
+        btn.textContent = 'Copy All';
+        btn.disabled = false;
+      }
+    }
     const prompt = $('promptSelectHeader').value;
-    let text = modelToMarkdown(appState.model, null);
+    let text = modelToMarkdown(appState.model, null, statsMap);
     if (prompt && PROMPTS[prompt]) text = PROMPTS[prompt] + text;
     await copyText(text);
     toast(`Copied ~${formatNum(estimateTokens(text))} tokens`);
@@ -1969,11 +2142,36 @@ function initEvents() {
       toast('No items selected');
       return;
     }
+    const includeStats = $('includeStats').checked && appState.pbixDataModel;
+    let statsMap = null;
+    if (includeStats) {
+      const btn = $('copySelectedBtn');
+      btn.textContent = 'Computing stats...';
+      btn.disabled = true;
+      try {
+        statsMap = await computeAllStats(appState.pbixDataModel, (i, total, name) => {
+          btn.textContent = `Stats ${i + 1}/${total}...`;
+        });
+      } finally {
+        btn.textContent = 'Copy Selected';
+        btn.disabled = false;
+      }
+    }
     const prompt = $('promptSelect').value;
-    let text = modelToMarkdown(appState.model, appState.checkedItems);
+    let text = modelToMarkdown(appState.model, appState.checkedItems, statsMap);
     if (prompt && PROMPTS[prompt]) text = PROMPTS[prompt] + text;
     await copyText(text);
     toast(`Copied ~${formatNum(estimateTokens(text))} tokens`);
+  });
+
+  // Sync stats checkboxes and update token badges
+  $('includeStatsHeader').addEventListener('change', () => {
+    $('includeStats').checked = $('includeStatsHeader').checked;
+    updateTokenBadges();
+  });
+  $('includeStats').addEventListener('change', () => {
+    $('includeStatsHeader').checked = $('includeStats').checked;
+    updateTokenBadges();
   });
 
   // New file
@@ -1985,6 +2183,10 @@ function initEvents() {
     appState.model = null;
     appState.checkedItems.clear();
     appState.selectedItem = null;
+    appState.pbixDataModel = null;
+    appState.statsCache = null;
+    $('includeStatsHeader').checked = false;
+    $('includeStats').checked = false;
   });
 
   // Diagram controls
@@ -2034,7 +2236,34 @@ function updateSelectedTokens() {
     return;
   }
   const md = modelToMarkdown(appState.model, appState.checkedItems);
-  $('selectedTokenBadge').textContent = `~${formatNum(estimateTokens(md))} tokens`;
+  const base = estimateTokens(md);
+  const statsChecked = $('includeStats').checked && appState.statsCache;
+  if (statsChecked) {
+    const withStats = modelToMarkdown(appState.model, appState.checkedItems, appState.statsCache);
+    const total = estimateTokens(withStats);
+    const diff = total - base;
+    $('selectedTokenBadge').textContent = `~${formatNum(total)} tokens (+${formatNum(diff)} stats)`;
+  } else {
+    $('selectedTokenBadge').textContent = `~${formatNum(base)} tokens`;
+  }
+}
+
+function updateTokenBadges() {
+  if (!appState.model) return;
+  // Header badge
+  const fullMd = modelToMarkdown(appState.model, null);
+  const base = estimateTokens(fullMd);
+  const statsChecked = $('includeStatsHeader').checked && appState.statsCache;
+  if (statsChecked) {
+    const withStats = modelToMarkdown(appState.model, null, appState.statsCache);
+    const total = estimateTokens(withStats);
+    const diff = total - base;
+    $('tokenBadge').textContent = `~${formatNum(total)} tokens (+${formatNum(diff)} stats)`;
+  } else {
+    $('tokenBadge').textContent = `~${formatNum(base)} tokens`;
+  }
+  // Selected badge
+  updateSelectedTokens();
 }
 
 // ============================================================

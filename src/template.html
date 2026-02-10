@@ -46,7 +46,7 @@
 
     <div class="footer-note">
       <div>Files never leave your browser. You can also download this page as <code>semantic-model-explorer.html</code> and use it offline.</div>
-      <div>Built with JSZip, Cytoscape.js, and XPress9.</div>
+      <div>Built by <a href="https://github.com/lczanna" target="_blank" rel="noopener">lczanna</a> with JSZip, Cytoscape.js, and XPress9.</div>
     </div>
   </div>
 </div>
@@ -72,6 +72,9 @@
       <span class="model-stats" id="modelStats"></span>
     </div>
     <div class="header-actions">
+      <label class="stats-toggle" id="includeStatsHeaderWrap" style="display:none">
+        <input type="checkbox" id="includeStatsHeader" style="accent-color:var(--accent);"> Include data profile
+      </label>
       <span class="token-badge" id="tokenBadge"></span>
       <span class="prompt-label">LLM prompt:</span>
       <select class="prompt-select prompt-select-secondary" id="promptSelectHeader" title="Optionally prepend an LLM prompt template to copied text">
@@ -118,6 +121,9 @@
               <option value="explain">+ Explain in plain language</option>
             </select>
           </div>
+          <label class="stats-toggle" id="includeStatsWrap" style="display:none">
+            <input type="checkbox" id="includeStats" style="accent-color:var(--accent);"> Include data profile
+          </label>
           <div style="display:flex;gap:6px;align-items:center;justify-content:space-between;">
             <button class="btn btn-primary" id="copySelectedBtn">Copy Selected</button>
             <span class="token-badge" id="selectedTokenBadge">~0 tokens</span>

@@ -1149,6 +1149,38 @@ async function extractTableDataStreaming(tableName, schema, fileCache, onProgres
 }
 
 /**
+ * Extract table stats column-by-column — memory efficient.
+ * Extracts one column, computes stats via _computeColumnStats (defined in app.js),
+ * then releases column data before moving to the next column.
+ * Only one column's data is ever in memory at a time.
+ *
+ * @param {Function} onProgress - (colIndex, totalCols, colName) => void
+ * @returns {Promise<Object[]>} Array of per-column stat objects
+ */
+async function extractTableStatsStreaming(tableName, schema, fileCache, onProgress) {
+  const tableSchema = schema.get(tableName);
+  if (!tableSchema) return null;
+
+  const stats = [];
+  const totalCols = tableSchema.columns.length;
+
+  for (let i = 0; i < totalCols; i++) {
+    const col = tableSchema.columns[i];
+    if (onProgress) onProgress(i, totalCols, col.name);
+    // Yield to event loop between columns
+    await new Promise(r => setTimeout(r, 0));
+
+    const values = _extractColumn(col, fileCache);
+    if (values === null) continue;
+
+    // Compute stats immediately, then values can be GC'd on next iteration
+    stats.push(_computeColumnStats(col.name, values));
+  }
+
+  return stats;
+}
+
+/**
  * Get a slice of rows from columnar data (on-demand transposition).
  * @returns {any[][]}
  */

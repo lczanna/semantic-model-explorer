@@ -1039,3 +1039,98 @@ class TestPbixDataExtraction:
             "() => document.getElementById('dataTabBtn').style.display"
         )
         assert display != "none", "Data tab should be visible for .pbix"
+
+
+class TestDataProfile:
+    """Tests for the data profile (column stats) feature."""
+
+    def test_stats_checkbox_visible_for_pbix(self, app: Page):
+        """Test that the data profile checkbox appears for .pbix files."""
+        pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
+        if not os.path.exists(pbix_path):
+            pytest.skip("Revenue_Opportunities.pbix not available")
+
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+
+        display = app.evaluate(
+            "() => document.getElementById('includeStatsHeaderWrap').style.display"
+        )
+        assert display != "none", "Stats checkbox should be visible for .pbix"
+
+    def test_stats_checkbox_hidden_for_bim(self, app: Page):
+        """Test that the data profile checkbox is hidden for .bim files."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+
+        display = app.evaluate(
+            "() => document.getElementById('includeStatsHeaderWrap').style.display"
+        )
+        assert display == "none", "Stats checkbox should be hidden for .bim"
+
+    def test_compute_column_stats(self, app: Page):
+        """Test that _computeColumnStats produces correct stats."""
+        pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
+        if not os.path.exists(pbix_path):
+            pytest.skip("Revenue_Opportunities.pbix not available")
+
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+
+        stats = app.evaluate("""() => {
+            const data = appState.model._pbixDataModel.getTable('Account');
+            const col0 = data.columnData[0];
+            const stat = _computeColumnStats(data.columns[0], col0);
+            return { name: stat.name, distinct: stat.distinct, nulls: stat.nulls, rowCount: stat.rowCount };
+        }""")
+
+        assert stats["name"] is not None
+        assert stats["distinct"] > 0
+        assert stats["rowCount"] > 0
+
+    def test_stats_in_markdown_output(self, app: Page):
+        """Test that stats appear in Markdown when statsMap is provided."""
+        pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
+        if not os.path.exists(pbix_path):
+            pytest.skip("Revenue_Opportunities.pbix not available")
+
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+
+        md = app.evaluate("""async () => {
+            const statsMap = await computeAllStats(appState.model._pbixDataModel, () => {});
+            return modelToMarkdown(appState.model, null, statsMap);
+        }""")
+
+        assert "**Data profile**" in md
+        assert "distinct" in md
+
+    def test_stats_not_in_markdown_without_flag(self, app: Page):
+        """Test that stats do NOT appear in Markdown by default."""
+        pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
+        if not os.path.exists(pbix_path):
+            pytest.skip("Revenue_Opportunities.pbix not available")
+
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+
+        md = app.evaluate("() => modelToMarkdown(appState.model, null)")
+
+        assert "**Data profile**" not in md
+
+    def test_stats_checkbox_syncs(self, app: Page):
+        """Test that header and footer stats checkboxes stay in sync."""
+        pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
+        if not os.path.exists(pbix_path):
+            pytest.skip("Revenue_Opportunities.pbix not available")
+
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+
+        # Check header checkbox
+        app.evaluate("() => { document.getElementById('includeStatsHeader').checked = true; document.getElementById('includeStatsHeader').dispatchEvent(new Event('change')); }")
+
+        footer_checked = app.evaluate(
+            "() => document.getElementById('includeStats').checked"
+        )
+        assert footer_checked, "Footer checkbox should sync with header"
