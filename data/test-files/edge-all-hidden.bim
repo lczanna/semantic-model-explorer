@@ -1,0 +1,1 @@
+{"name": "All Hidden", "compatibilityLevel": 1604, "model": {"tables": [{"name": "HiddenTable", "isHidden": true, "columns": [{"name": "HiddenCol", "dataType": "int64", "sourceColumn": "x", "isHidden": true}], "measures": [{"name": "HiddenMeasure", "expression": "1", "isHidden": true}], "partitions": [{"name": "p", "source": {"type": "m", "expression": "Source"}}]}]}}

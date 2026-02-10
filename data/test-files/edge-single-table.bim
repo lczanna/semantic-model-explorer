@@ -1,0 +1,1 @@
+{"name": "Single Table", "compatibilityLevel": 1604, "model": {"tables": [{"name": "OnlyTable", "columns": [{"name": "Val", "dataType": "string", "sourceColumn": "Val"}], "measures": [{"name": "Count", "expression": "COUNTROWS(OnlyTable)"}], "partitions": [{"name": "p", "source": {"type": "m", "expression": "Source"}}]}]}}

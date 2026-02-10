@@ -1,0 +1,1 @@
+{"name": "No Measures Model", "compatibilityLevel": 1604, "model": {"tables": [{"name": "Data", "columns": [{"name": "ID", "dataType": "int64", "sourceColumn": "ID"}, {"name": "Name", "dataType": "string", "sourceColumn": "Name"}], "partitions": [{"name": "p", "source": {"type": "m", "expression": "Source"}}]}]}}

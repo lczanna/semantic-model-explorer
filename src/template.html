@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:;">
+<title>Semantic Model Explorer</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='12'%20fill='%230f172a'/%3E%3Crect%20x='6'%20y='6'%20width='52'%20height='52'%20rx='10'%20fill='%2360c0a0'/%3E%3Ctext%20x='32'%20y='41'%20font-size='24'%20text-anchor='middle'%20fill='%230b1020'%20font-family='Arial,sans-serif'%20font-weight='700'%3ESM%3C/text%3E%3C/svg%3E">
+<style>
+{{STYLES}}
+</style>
+</head>
+<body>
+
+<!-- Landing Page -->
+<div class="landing-wrap" id="dropZoneWrap">
+  <div class="landing-container">
+    <header class="landing-header">
+      <div class="logo">
+        <div class="logo-icon">SM</div>
+        <div><h1>Semantic Model Explorer</h1><div class="landing-subtitle">Explore Power BI semantic models &amp; copy as LLM-ready Markdown</div></div>
+      </div>
+      <div class="privacy-badge">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        100% local, no network needed
+      </div>
+    </header>
+
+    <div class="drop-zone" id="dropZone">
+      <div class="drop-zone-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="32" height="32"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      </div>
+      <h2>Drop your files here</h2>
+      <p>Drag a Power BI file or browse to select one</p>
+      <div class="file-types">
+        <span class="file-type-badge">.pbix</span>
+        <span class="file-type-badge">.pbit</span>
+        <span class="file-type-badge">.bim</span>
+        <span class="file-type-badge">.zip</span>
+      </div>
+      <label class="browse-btn">
+        Browse Files
+        <input type="file" id="fileInput" multiple accept=".pbix,.pbit,.bim,.zip">
+      </label>
+    </div>
+
+    <div class="footer-note">
+      <div>Files never leave your browser. You can also download this page as <code>semantic-model-explorer.html</code> and use it offline.</div>
+      <div>Built with JSZip, Cytoscape.js, and XPress9.</div>
+      <div>&copy; 2025 <a href="https://www.linkedin.com/in/lucazanna/" target="_blank" rel="noopener noreferrer">Luca Zanna</a></div>
+    </div>
+  </div>
+</div>
+
+<!-- Loading -->
+<div class="loading-wrap" id="loadingWrap">
+  <div class="spinner"></div>
+  <div class="loading-text" id="loadingText">Parsing model...</div>
+</div>
+
+<!-- Error Banner -->
+<div class="error-banner" id="errorBanner">
+  <strong>Some issues occurred:</strong>
+  <ul id="errorList"></ul>
+</div>
+
+<!-- Main App -->
+<div class="app-wrap" id="appWrap">
+  <div class="app-header">
+    <div class="model-info">
+      <span class="model-name" id="modelName"></span>
+      <span class="model-badge" id="modelFormat"></span>
+      <span class="model-stats" id="modelStats"></span>
+    </div>
+    <div class="header-actions">
+      <label class="stats-toggle" id="includeStatsHeaderWrap" style="display:none">
+        <input type="checkbox" id="includeStatsHeader" style="accent-color:var(--accent);"> Include data profile
+      </label>
+      <span class="token-badge" id="tokenBadge"></span>
+      <span class="prompt-label">LLM prompt:</span>
+      <select class="prompt-select prompt-select-secondary" id="promptSelectHeader" title="Optionally prepend an LLM prompt template to copied text">
+        <option value="">No prompt</option>
+        <option value="analyze">+ Analyze best practices</option>
+        <option value="document">+ Generate documentation</option>
+        <option value="optimize">+ Suggest optimizations</option>
+        <option value="explain">+ Explain in plain language</option>
+      </select>
+      <button class="btn btn-primary" id="copyAllBtn">Copy All</button>
+      <span class="new-file-link" id="newFileBtn">New File</span>
+    </div>
+  </div>
+  <div class="tab-bar" id="tabBar">
+    <button class="tab-btn active" data-tab="model">Model</button>
+    <button class="tab-btn" data-tab="diagram">Diagram</button>
+    <button class="tab-btn" data-tab="data" id="dataTabBtn" style="display:none">Data</button>
+  </div>
+
+  <!-- Model Tab -->
+  <div class="tab-content active" id="tab-model">
+    <div class="model-tab">
+      <div class="model-tree-panel">
+        <div class="tree-toolbar">
+          <input type="text" class="tree-search" id="treeSearch" placeholder="Search tables, measures, columns...">
+          <div class="tree-controls">
+            <label style="font-size:11px;display:flex;align-items:center;gap:4px;cursor:pointer;">
+              <input type="checkbox" id="selectAll" style="accent-color:var(--accent);"> Select All
+            </label>
+            <label style="font-size:11px;display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--text2);">
+              <input type="checkbox" id="showHidden" style="accent-color:var(--accent);"> Hidden
+            </label>
+          </div>
+        </div>
+        <div class="tree-scroll" id="treeScroll"></div>
+        <div class="tree-footer">
+          <div style="display:flex;gap:6px;align-items:center;">
+            <span class="prompt-label">LLM prompt:</span>
+          <select class="prompt-select prompt-select-secondary" id="promptSelect" title="Optionally prepend an LLM prompt template to copied text">
+              <option value="">No prompt</option>
+              <option value="analyze">+ Analyze best practices</option>
+              <option value="document">+ Generate documentation</option>
+              <option value="optimize">+ Suggest optimizations</option>
+              <option value="explain">+ Explain in plain language</option>
+            </select>
+          </div>
+          <label class="stats-toggle" id="includeStatsWrap" style="display:none">
+            <input type="checkbox" id="includeStats" style="accent-color:var(--accent);"> Include data profile
+          </label>
+          <div style="display:flex;gap:6px;align-items:center;justify-content:space-between;">
+            <button class="btn btn-primary" id="copySelectedBtn">Copy Selected</button>
+            <span class="token-badge" id="selectedTokenBadge">~0 tokens</span>
+          </div>
+        </div>
+      </div>
+      <div class="detail-panel" id="detailPanel">
+        <div class="detail-empty">Select an item to see details</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Diagram Tab -->
+  <div class="tab-content" id="tab-diagram">
+    <div class="diagram-tab">
+      <div class="diagram-toolbar">
+        <input type="text" class="search-input" id="diagramSearch" placeholder="Search tables...">
+        <button class="btn btn-small" id="dgZoomIn" title="Zoom In">+</button>
+        <button class="btn btn-small" id="dgZoomOut" title="Zoom Out">-</button>
+        <button class="btn btn-small" id="dgFit" title="Fit">Fit</button>
+        <button class="btn btn-small" id="dgRelayout" title="Relayout">Relayout</button>
+        <label style="font-size:11px;display:flex;align-items:center;gap:4px;margin-left:auto;cursor:pointer;color:var(--text2);">
+          <input type="checkbox" id="dgShowHidden" style="accent-color:var(--accent);"> Show Hidden
+        </label>
+      </div>
+      <div class="diagram-body">
+        <div class="diagram-container" id="diagramContainer"></div>
+        <div class="diagram-side-panel" id="diagramSidePanel"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Data Tab (visible only for .pbix with DataModel) -->
+  <div class="tab-content" id="tab-data">
+    <div class="data-tab">
+      <div class="data-sidebar">
+        <div class="data-sidebar-header">Tables</div>
+        <div class="data-table-list" id="dataTableList"></div>
+      </div>
+      <div class="data-main">
+        <div class="data-toolbar" id="dataToolbar">
+          <span class="data-table-name" id="dataTableName">Select a table</span>
+          <span class="data-row-count" id="dataRowCount"></span>
+          <div style="margin-left:auto;display:flex;gap:6px;">
+            <button class="btn btn-small" id="exportCsvBtn" disabled>Export CSV</button>
+            <button class="btn btn-small" id="exportParquetBtn" disabled>Export Parquet</button>
+          </div>
+        </div>
+        <div class="data-preview" id="dataPreview">
+          <div class="detail-empty">Select a table to preview its data</div>
+        </div>
+        <div class="data-status" id="dataStatus"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<!-- XPress9 Emscripten WASM Module -->
+<script>
+{{XPRESS9_GLUE}}
+</script>
+
+<!-- Main Application -->
+<script>
+'use strict';
+{{APP_JS}}
+</script>
+
+<!-- VertiPaq Decoder: XPress9 + ABF + VertiPaq column extraction -->
+<script>
+'use strict';
+{{VERTIPAQ_JS}}
+</script>
+
+<!-- Data Export: CSV + Parquet -->
+<script>
+'use strict';
+{{EXPORT_JS}}
+</script>
+
+<!-- JSZip v3.10.1 -->
+<script>
+{{JSZIP}}
+</script>
+
+<!-- Cytoscape v3.30.4 -->
+<script>
+{{CYTOSCAPE}}
+</script>
+
+<!-- hyparquet-writer (Parquet file writer) -->
+<script>
+{{HYPARQUET_WRITER}}
+</script>
+
+</body>
+</html>

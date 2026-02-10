@@ -1,0 +1,22 @@
+table Customer
+	lineageTag: test-customer-001
+
+	column CustomerKey
+		dataType: int64
+		sourceColumn: CustomerKey
+
+	column 'Customer Name'
+		dataType: string
+		sourceColumn: CustomerName
+
+	column Region
+		dataType: string
+		sourceColumn: Region
+
+	column Country
+		dataType: string
+		sourceColumn: Country
+
+	partition Customer = m
+		mode: import
+		source = Source

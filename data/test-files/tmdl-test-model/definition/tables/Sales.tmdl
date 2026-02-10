@@ -1,0 +1,73 @@
+table Sales
+	lineageTag: test-sales-001
+
+	measure 'Total Sales' = SUM(Sales[Amount])
+		formatString: $#,##0
+		displayFolder: Revenue
+		description: Total revenue from all transactions
+
+	measure 'YoY Growth' =
+			VAR CurrentYear = [Total Sales]
+			VAR PriorYear = CALCULATE([Total Sales], SAMEPERIODLASTYEAR('Date'[Date]))
+			RETURN DIVIDE(CurrentYear - PriorYear, PriorYear)
+		formatString: 0.0%
+		displayFolder: Revenue
+
+	measure 'Order Count' = COUNTROWS(Sales)
+		formatString: #,##0
+		displayFolder: Counts
+
+	measure 'Avg Order Value' = DIVIDE([Total Sales], [Order Count])
+		formatString: $#,##0.00
+		displayFolder: Revenue
+
+	measure 'Total Cost' = SUM(Sales[Cost])
+		formatString: $#,##0
+		isHidden
+
+	measure 'Margin %' = DIVIDE([Total Sales] - [Total Cost], [Total Sales])
+		formatString: 0.0%
+		displayFolder: Profitability
+
+	column OrderID
+		dataType: int64
+		sourceColumn: OrderID
+
+	column OrderDate
+		dataType: dateTime
+		formatString: d/m/yyyy
+		sourceColumn: OrderDate
+
+	column Amount
+		dataType: decimal
+		formatString: $#,##0
+		sourceColumn: Amount
+
+	column CustomerKey
+		dataType: int64
+		isHidden
+		sourceColumn: CustomerKey
+
+	column ProductKey
+		dataType: int64
+		isHidden
+		sourceColumn: ProductKey
+
+	column Margin
+		dataType: decimal
+		formatString: $#,##0
+		expression = Sales[Amount] - Sales[Cost]
+
+	column Cost
+		dataType: decimal
+		isHidden
+		sourceColumn: Cost
+
+	partition Sales = m
+		mode: import
+		source =
+			let
+			    Source = Sql.Database("server", "db"),
+			    Sales = Source{[Schema="dbo",Item="Sales"]}[Data]
+			in
+			    Sales

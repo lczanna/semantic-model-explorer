@@ -1,0 +1,15 @@
+table 'Hidden Helper'
+	isHidden
+	lineageTag: test-hidden-001
+
+	column ID
+		dataType: int64
+		sourceColumn: ID
+
+	column Value
+		dataType: string
+		sourceColumn: Value
+
+	partition HiddenHelper = m
+		mode: import
+		source = Source

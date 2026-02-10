@@ -1,0 +1,349 @@
+{
+  "name": "Test Sales Model",
+  "compatibilityLevel": 1604,
+  "model": {
+    "culture": "en-US",
+    "tables": [
+      {
+        "name": "Sales",
+        "columns": [
+          {
+            "name": "OrderID",
+            "dataType": "int64",
+            "sourceColumn": "OrderID"
+          },
+          {
+            "name": "OrderDate",
+            "dataType": "dateTime",
+            "sourceColumn": "OrderDate",
+            "formatString": "d/m/yyyy"
+          },
+          {
+            "name": "Amount",
+            "dataType": "decimal",
+            "sourceColumn": "Amount",
+            "formatString": "$#,##0"
+          },
+          {
+            "name": "CustomerKey",
+            "dataType": "int64",
+            "sourceColumn": "CustomerKey",
+            "isHidden": true
+          },
+          {
+            "name": "ProductKey",
+            "dataType": "int64",
+            "sourceColumn": "ProductKey",
+            "isHidden": true
+          },
+          {
+            "name": "Margin",
+            "dataType": "decimal",
+            "type": "calculated",
+            "expression": "Sales[Amount] - Sales[Cost]",
+            "formatString": "$#,##0"
+          },
+          {
+            "name": "Cost",
+            "dataType": "decimal",
+            "sourceColumn": "Cost",
+            "isHidden": true
+          }
+        ],
+        "measures": [
+          {
+            "name": "Total Sales",
+            "expression": "SUM(Sales[Amount])",
+            "formatString": "$#,##0",
+            "displayFolder": "Revenue",
+            "description": "Total revenue from all transactions"
+          },
+          {
+            "name": "YoY Growth",
+            "expression": "VAR CurrentYear = [Total Sales]\nVAR PriorYear = CALCULATE([Total Sales], SAMEPERIODLASTYEAR('Date'[Date]))\nRETURN DIVIDE(CurrentYear - PriorYear, PriorYear)",
+            "formatString": "0.0%",
+            "displayFolder": "Revenue"
+          },
+          {
+            "name": "Order Count",
+            "expression": "COUNTROWS(Sales)",
+            "formatString": "#,##0",
+            "displayFolder": "Counts"
+          },
+          {
+            "name": "Avg Order Value",
+            "expression": "DIVIDE([Total Sales], [Order Count])",
+            "formatString": "$#,##0.00",
+            "displayFolder": "Revenue"
+          },
+          {
+            "name": "Total Cost",
+            "expression": "SUM(Sales[Cost])",
+            "formatString": "$#,##0",
+            "isHidden": true
+          },
+          {
+            "name": "Margin %",
+            "expression": "DIVIDE([Total Sales] - [Total Cost], [Total Sales])",
+            "formatString": "0.0%",
+            "displayFolder": "Profitability"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "Sales",
+            "source": {
+              "type": "m",
+              "expression": "let\n    Source = Sql.Database(\"server\", \"db\"),\n    Sales = Source{[Schema=\"dbo\",Item=\"Sales\"]}[Data]\nin\n    Sales"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Date",
+        "columns": [
+          {
+            "name": "Date",
+            "dataType": "dateTime",
+            "sourceColumn": "Date",
+            "formatString": "d/m/yyyy"
+          },
+          {
+            "name": "Year",
+            "dataType": "int64",
+            "sourceColumn": "Year"
+          },
+          {
+            "name": "Quarter",
+            "dataType": "string",
+            "sourceColumn": "Quarter"
+          },
+          {
+            "name": "Month",
+            "dataType": "string",
+            "sourceColumn": "Month",
+            "sortByColumn": "MonthNumber"
+          },
+          {
+            "name": "MonthNumber",
+            "dataType": "int64",
+            "sourceColumn": "MonthNumber",
+            "isHidden": true
+          }
+        ],
+        "measures": [
+          {
+            "name": "Current Year",
+            "expression": "YEAR(TODAY())",
+            "formatString": "0"
+          }
+        ],
+        "hierarchies": [
+          {
+            "name": "Date Hierarchy",
+            "levels": [
+              {
+                "name": "Year",
+                "column": "Year"
+              },
+              {
+                "name": "Quarter",
+                "column": "Quarter"
+              },
+              {
+                "name": "Month",
+                "column": "Month"
+              }
+            ]
+          }
+        ],
+        "partitions": [
+          {
+            "name": "Date",
+            "source": {
+              "type": "m",
+              "expression": "let\n    Source = List.Dates(#date(2020,1,1), 1461, #duration(1,0,0,0)),\n    Table = Table.FromList(Source)\nin\n    Table"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Product",
+        "columns": [
+          {
+            "name": "ProductKey",
+            "dataType": "int64",
+            "sourceColumn": "ProductKey"
+          },
+          {
+            "name": "Product Name",
+            "dataType": "string",
+            "sourceColumn": "ProductName"
+          },
+          {
+            "name": "Category",
+            "dataType": "string",
+            "sourceColumn": "Category"
+          },
+          {
+            "name": "Subcategory",
+            "dataType": "string",
+            "sourceColumn": "Subcategory"
+          },
+          {
+            "name": "Unit Price",
+            "dataType": "decimal",
+            "sourceColumn": "UnitPrice",
+            "formatString": "$#,##0.00"
+          }
+        ],
+        "hierarchies": [
+          {
+            "name": "Product Hierarchy",
+            "levels": [
+              {
+                "name": "Category",
+                "column": "Category"
+              },
+              {
+                "name": "Subcategory",
+                "column": "Subcategory"
+              },
+              {
+                "name": "Product Name",
+                "column": "Product Name"
+              }
+            ]
+          }
+        ],
+        "partitions": [
+          {
+            "name": "Product",
+            "source": {
+              "type": "m",
+              "expression": "Source"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Customer",
+        "columns": [
+          {
+            "name": "CustomerKey",
+            "dataType": "int64",
+            "sourceColumn": "CustomerKey"
+          },
+          {
+            "name": "Customer Name",
+            "dataType": "string",
+            "sourceColumn": "CustomerName"
+          },
+          {
+            "name": "Region",
+            "dataType": "string",
+            "sourceColumn": "Region"
+          },
+          {
+            "name": "Country",
+            "dataType": "string",
+            "sourceColumn": "Country"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "Customer",
+            "source": {
+              "type": "m",
+              "expression": "Source"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Hidden Helper",
+        "isHidden": true,
+        "columns": [
+          {
+            "name": "ID",
+            "dataType": "int64",
+            "sourceColumn": "ID"
+          },
+          {
+            "name": "Value",
+            "dataType": "string",
+            "sourceColumn": "Value"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "HiddenHelper",
+            "source": {
+              "type": "m",
+              "expression": "Source"
+            }
+          }
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "name": "Sales_Product",
+        "fromTable": "Sales",
+        "fromColumn": "ProductKey",
+        "toTable": "Product",
+        "toColumn": "ProductKey",
+        "fromCardinality": "many",
+        "toCardinality": "one"
+      },
+      {
+        "name": "Sales_Customer",
+        "fromTable": "Sales",
+        "fromColumn": "CustomerKey",
+        "toTable": "Customer",
+        "toColumn": "CustomerKey",
+        "fromCardinality": "many",
+        "toCardinality": "one"
+      },
+      {
+        "name": "Sales_Date",
+        "fromTable": "Sales",
+        "fromColumn": "OrderDate",
+        "toTable": "Date",
+        "toColumn": "Date",
+        "fromCardinality": "many",
+        "toCardinality": "one"
+      },
+      {
+        "name": "Sales_Date_Inactive",
+        "fromTable": "Sales",
+        "fromColumn": "OrderDate",
+        "toTable": "Date",
+        "toColumn": "Date",
+        "isActive": false,
+        "fromCardinality": "many",
+        "toCardinality": "one",
+        "crossFilteringBehavior": "bothDirections"
+      }
+    ],
+    "roles": [
+      {
+        "name": "Regional Manager",
+        "tablePermissions": [
+          {
+            "name": "Customer",
+            "filterExpression": "[Region] = USERPRINCIPALNAME()"
+          }
+        ]
+      },
+      {
+        "name": "Executive",
+        "tablePermissions": [
+          {
+            "name": "Sales"
+          }
+        ]
+      }
+    ]
+  }
+}

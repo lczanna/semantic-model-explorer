@@ -1,0 +1,14 @@
+[project]
+name = "semantic-model-explorer"
+version = "0.1.0"
+description = "Browser-based Power BI semantic model explorer"
+requires-python = ">=3.10"
+dependencies = [
+    "playwright==1.56.0",
+    "pytest>=7.0",
+    "pytest-playwright>=0.4",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["scripts"]
+python_files = ["run_tests.py"]
