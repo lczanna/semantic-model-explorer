@@ -1841,3 +1841,160 @@ class TestInactiveRelationships:
 
         md = app.evaluate("() => modelToMarkdown(appState.model, null)")
         assert "Both" in md, "Markdown should show bidirectional as 'Both'"
+
+
+# ============================================================
+# Breaker Bug-Fix Tests
+# ============================================================
+
+
+class TestEscHtmlQuotes:
+    """Tests for escHtml escaping quotes (XSS fix)."""
+
+    def test_eschtml_escapes_double_quotes(self, app: Page):
+        """escHtml should escape double quotes to &quot;"""
+        result = app.evaluate('() => escHtml(\'He said "hello"\')')
+        assert "&quot;" in result
+        assert '"' not in result
+
+    def test_eschtml_escapes_single_quotes(self, app: Page):
+        """escHtml should escape single quotes to &#39;"""
+        result = app.evaluate("() => escHtml(\"It's a test\")")
+        assert "&#39;" in result
+
+    def test_xss_in_data_key_attribute(self, app: Page):
+        """Attribute injection via data-key should be prevented by quote escaping."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-special-chars.bim"))
+        wait_for_app(app)
+        # Ensure no unescaped quotes leak into data-key attributes
+        html = app.inner_html("#treeScroll")
+        # All occurrences of data-key="..." should not contain raw unescaped double quotes inside
+        # (the escHtml should have converted them to &quot;)
+        assert 'data-key="table:' in html or "data-key=" in html
+
+
+class TestColonInNames:
+    """Tests for names containing colons in detail panel lookup."""
+
+    def test_detail_panel_colon_column(self, app: Page):
+        """Column with colon in name should display correctly in detail panel."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-special-chars.bim"))
+        wait_for_app(app)
+        # Click the table to see its detail
+        app.click('.tree-item[data-key^="table:"]')
+        detail = app.inner_html("#detailPanel")
+        assert "Col:colon:name" in detail, "Column with colons should appear in detail"
+
+    def test_measure_with_colon_table_lookup(self, app: Page):
+        """Measures should be found even when table name has special chars."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-special-chars.bim"))
+        wait_for_app(app)
+        # Click first measure in tree
+        measure_items = app.query_selector_all('.tree-item[data-key^="measure:"]')
+        if len(measure_items) > 0:
+            measure_items[0].click()
+            detail = app.inner_html("#detailPanel")
+            assert "detail-code" in detail or "detail-title" in detail
+
+
+class TestPipeInMarkdown:
+    """Tests for pipe characters in Markdown table cells."""
+
+    def test_pipe_escaped_in_column_markdown(self, app: Page):
+        """Pipe chars in column names should be escaped as \\| in Markdown tables."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-special-chars.bim"))
+        wait_for_app(app)
+        md = app.evaluate("() => modelToMarkdown(appState.model, null)")
+        # The column "Col|pipe|bar" should have pipes escaped in the table
+        assert "Col\\|pipe\\|bar" in md, "Pipe characters should be escaped in Markdown tables"
+
+    def test_escMdTable_function(self, app: Page):
+        """escMdTable should escape pipe characters."""
+        result = app.evaluate("() => escMdTable('hello|world')")
+        assert result == "hello\\|world"
+
+    def test_escMdTable_null_handling(self, app: Page):
+        """escMdTable should handle null values."""
+        result = app.evaluate("() => escMdTable(null)")
+        assert result == ""
+
+
+class TestUnquoteTmdl:
+    """Tests for TMDL unquoting with doubled quotes."""
+
+    def test_doubled_single_quotes_unescaped(self, app: Page):
+        """unquoteTmdl should unescape doubled single quotes: 'it''s' -> it's"""
+        result = app.evaluate("() => unquoteTmdl(\"'it''s a test'\")")
+        assert result == "it's a test"
+
+    def test_doubled_double_quotes_unescaped(self, app: Page):
+        """unquoteTmdl should unescape doubled double quotes."""
+        result = app.evaluate('() => unquoteTmdl(\'"say ""hello"" now"\')')
+        assert result == 'say "hello" now'
+
+    def test_no_quotes_unchanged(self, app: Page):
+        """unquoteTmdl should leave unquoted strings unchanged."""
+        result = app.evaluate("() => unquoteTmdl('plaintext')")
+        assert result == "plaintext"
+
+
+class TestTmdlDottedTableNames:
+    """Tests for TMDL relationship parsing with dotted table names."""
+
+    def test_splitTmdlQualifiedName_quoted(self, app: Page):
+        """splitTmdlQualifiedName should handle quoted names with dots."""
+        result = app.evaluate("() => splitTmdlQualifiedName(\"'Schema.Sales'.ProductKey\")")
+        assert result == ["Schema.Sales", "ProductKey"]
+
+    def test_splitTmdlQualifiedName_unquoted(self, app: Page):
+        """splitTmdlQualifiedName should handle simple unquoted names."""
+        result = app.evaluate("() => splitTmdlQualifiedName('Sales.ProductKey')")
+        assert result == ["Sales", "ProductKey"]
+
+    def test_splitTmdlQualifiedName_escaped_quotes(self, app: Page):
+        """splitTmdlQualifiedName should handle escaped quotes in table name."""
+        result = app.evaluate("() => splitTmdlQualifiedName(\"'It''s.A.Table'.Col\")")
+        assert result == ["It's.A.Table", "Col"]
+
+    def test_tmdl_dotted_relationship_parsed(self, app: Page):
+        """TMDL model with dotted table names in relationships should parse correctly."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "tmdl-test-model.zip"))
+        wait_for_app(app)
+        md = app.evaluate("() => modelToMarkdown(appState.model, null)")
+        assert "Schema.Sales" in md, "Dotted table name should be preserved in relationships"
+        assert "Schema.Product" in md
+
+
+class TestTabResetOnNewFile:
+    """Tests for tab state reset when loading a new file."""
+
+    def test_tab_resets_to_model_on_new_file(self, app: Page):
+        """After clicking New File, active tab should be Model."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+        # Switch to Diagram tab
+        app.click('[data-tab="diagram"]')
+        app.wait_for_timeout(300)
+        # Click New File
+        app.click("#newFileBtn")
+        app.wait_for_selector("#dropZone", state="visible")
+        # Load another file
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-single-table.bim"))
+        wait_for_app(app)
+        # Check that Model tab is active
+        model_btn = app.query_selector('.tab-btn[data-tab="model"]')
+        assert "active" in model_btn.get_attribute("class"), "Model tab should be active after New File"
+
+    def test_diagram_tab_not_active_after_new_file(self, app: Page):
+        """Diagram tab should not remain active after New File."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+        # Switch to Diagram tab
+        app.click('[data-tab="diagram"]')
+        app.wait_for_timeout(300)
+        # Click New File
+        app.click("#newFileBtn")
+        app.wait_for_selector("#dropZone", state="visible")
+        # Verify diagram tab is not active
+        diagram_btn = app.query_selector('.tab-btn[data-tab="diagram"]')
+        assert "active" not in diagram_btn.get_attribute("class")

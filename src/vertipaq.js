@@ -358,7 +358,7 @@ function readSQLiteTables(dbBuf) {
         const len = lens[st];
         let val = 0;
         for (let i = 0; i < len; i++) val = val * 256 + payload[dPos + i];
-        if (len > 0 && payload[dPos] & 0x80) val -= (1 << (len * 8));
+        if (len > 0 && payload[dPos] & 0x80) val -= Math.pow(2, len * 8);
         values.push(val);
         dPos += len;
       }

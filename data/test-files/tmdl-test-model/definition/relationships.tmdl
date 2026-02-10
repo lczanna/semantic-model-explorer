@@ -15,3 +15,7 @@ relationship Sales_Date_Inactive
 	crossFilteringBehavior: bothDirections
 	fromColumn: Sales.OrderDate
 	toColumn: Date.Date
+
+relationship Dotted_Table_Rel
+	fromColumn: 'Schema.Sales'.ProductKey
+	toColumn: 'Schema.Product'.ProductKey

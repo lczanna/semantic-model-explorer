@@ -299,6 +299,10 @@ relationship Sales_Date_Inactive
 \tcrossFilteringBehavior: bothDirections
 \tfromColumn: Sales.OrderDate
 \ttoColumn: Date.Date
+
+relationship Dotted_Table_Rel
+\tfromColumn: 'Schema.Sales'.ProductKey
+\ttoColumn: 'Schema.Product'.ProductKey
 """
         )
 
@@ -556,6 +560,7 @@ def generate_edge_case_files(output_dir):
                         {"name": "Column <html>", "dataType": "string", "sourceColumn": "x"},
                         {"name": "Column \"quoted\"", "dataType": "int64", "sourceColumn": "y"},
                         {"name": "Col|pipe|bar", "dataType": "string", "sourceColumn": "z"},
+                        {"name": "Col:colon:name", "dataType": "string", "sourceColumn": "w"},
                         {"name": "Unicode\u00e9\u00e8\u00fc\u00f1", "dataType": "string", "sourceColumn": "u"},
                     ],
                     "measures": [

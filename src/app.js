@@ -50,7 +50,7 @@ async function copyText(text) {
   }
 }
 
-function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
 function estimateTokens(text) {
   // Rough estimate: ~4 chars per token for English/code
@@ -60,6 +60,11 @@ function estimateTokens(text) {
 function formatNum(n) {
   if (n == null) return '';
   return n.toLocaleString();
+}
+
+function escMdTable(s) {
+  if (s == null) return '';
+  return String(s).replace(/\|/g, '\\|');
 }
 
 // ============================================================
@@ -655,18 +660,14 @@ function parseTmdlRelationships(text) {
         const inner = lines[i].trim();
         if (!inner || (getIndent(lines[i]) === 0 && inner.startsWith('relationship '))) break;
         if (inner.startsWith('fromColumn:')) {
-          const parts = inner.substring(11).trim().split('.');
-          if (parts.length >= 2) {
-            rel.fromTable = unquoteTmdl(parts[0]);
-            rel.fromColumn = unquoteTmdl(parts.slice(1).join('.'));
-          }
+          const [table, col] = splitTmdlQualifiedName(inner.substring(11).trim());
+          rel.fromTable = table;
+          rel.fromColumn = col;
         }
         if (inner.startsWith('toColumn:')) {
-          const parts = inner.substring(9).trim().split('.');
-          if (parts.length >= 2) {
-            rel.toTable = unquoteTmdl(parts[0]);
-            rel.toColumn = unquoteTmdl(parts.slice(1).join('.'));
-          }
+          const [table, col] = splitTmdlQualifiedName(inner.substring(9).trim());
+          rel.toTable = table;
+          rel.toColumn = col;
         }
         if (inner.startsWith('crossFilteringBehavior:')) {
           const val = inner.split(':')[1].trim();
@@ -778,9 +779,29 @@ function getIndent(line) {
 function unquoteTmdl(s) {
   if (!s) return '';
   s = s.trim();
-  if (s.startsWith("'") && s.endsWith("'")) return s.slice(1, -1);
-  if (s.startsWith('"') && s.endsWith('"')) return s.slice(1, -1);
+  if (s.startsWith("'") && s.endsWith("'")) return s.slice(1, -1).replace(/''/g, "'");
+  if (s.startsWith('"') && s.endsWith('"')) return s.slice(1, -1).replace(/""/g, '"');
   return s;
+}
+
+function splitTmdlQualifiedName(s) {
+  s = (s || '').trim();
+  if (s.startsWith("'")) {
+    let i = 1;
+    while (i < s.length) {
+      if (s[i] === "'" && i + 1 < s.length && s[i + 1] === "'") { i += 2; continue; }
+      if (s[i] === "'") {
+        const table = s.substring(0, i + 1);
+        const rest = s.substring(i + 1);
+        if (rest.startsWith('.')) return [unquoteTmdl(table), unquoteTmdl(rest.substring(1))];
+        return [unquoteTmdl(table), ''];
+      }
+      i++;
+    }
+  }
+  const dot = s.indexOf('.');
+  if (dot >= 0) return [unquoteTmdl(s.substring(0, dot)), unquoteTmdl(s.substring(dot + 1))];
+  return [unquoteTmdl(s), ''];
 }
 
 // --- PBIX Parser (metadata only via DataModelSchema if present) ---
@@ -1265,7 +1286,7 @@ function modelToMarkdown(model, items, statsMap) {
         for (const c of t.columns) {
           const hidden = c.isHidden ? 'Yes' : '';
           const calc = c.type === 'calculated' ? 'Yes' : '';
-          lines.push(`| ${c.name} | ${c.dataType} | ${hidden} | ${calc} | ${c.formatString || ''} |`);
+          lines.push(`| ${escMdTable(c.name)} | ${escMdTable(c.dataType)} | ${hidden} | ${calc} | ${escMdTable(c.formatString || '')} |`);
         }
       }
 
@@ -1378,7 +1399,7 @@ function modelToMarkdown(model, items, statsMap) {
       const card = cardinalityLabel(r.cardinality);
       const dir = r.crossFilterDirection === 'both' ? 'Both' : 'Single';
       const active = r.isActive ? 'Yes' : 'No';
-      lines.push(`| ${r.fromTable}[${r.fromColumn}] | ${r.toTable}[${r.toColumn}] | ${card} | ${dir} | ${active} |`);
+      lines.push(`| ${escMdTable(r.fromTable)}[${escMdTable(r.fromColumn)}] | ${escMdTable(r.toTable)}[${escMdTable(r.toColumn)}] | ${card} | ${dir} | ${active} |`);
     }
     lines.push('');
   }
@@ -1603,29 +1624,32 @@ function renderDetail(key) {
     return;
   }
 
-  const parts = key.split(':');
-  const type = parts[0];
-
-  if (type === 'table') {
-    const tName = parts[1];
+  // Use startsWith instead of split(':') to handle names containing colons
+  if (key.startsWith('table:')) {
+    const tName = key.substring(6);
     const table = appState.model.tables.find(t => t.name === tName);
     if (!table) return;
     renderTableDetail(panel, table);
-  } else if (type === 'measure') {
-    const tName = parts[1];
-    const mName = parts.slice(2).join(':');
-    const table = appState.model.tables.find(t => t.name === tName);
-    const measure = table ? table.measures.find(m => m.name === mName) : null;
-    if (!measure) return;
-    renderMeasureDetail(panel, measure, tName);
-  } else if (type === 'rel') {
+  } else if (key.startsWith('measure:')) {
+    const rest = key.substring(8);
+    let found = null, foundTable = '';
+    for (const t of appState.model.tables) {
+      for (const m of t.measures) {
+        if (rest === t.name + ':' + m.name) { found = m; foundTable = t.name; break; }
+      }
+      if (found) break;
+    }
+    if (!found) return;
+    renderMeasureDetail(panel, found, foundTable);
+  } else if (key.startsWith('rel:')) {
+    const rest = key.substring(4);
     const r = appState.model.relationships.find(r =>
-      r.fromTable === parts[1] && r.fromColumn === parts[2] &&
-      r.toTable === parts[3] && r.toColumn === parts[4]);
+      rest === r.fromTable + ':' + r.fromColumn + ':' + r.toTable + ':' + r.toColumn);
     if (!r) return;
     renderRelDetail(panel, r);
-  } else if (type === 'role') {
-    const role = appState.model.roles.find(r => r.name === parts[1]);
+  } else if (key.startsWith('role:')) {
+    const roleName = key.substring(5);
+    const role = appState.model.roles.find(r => r.name === roleName);
     if (!role) return;
     renderRoleDetail(panel, role);
   }
@@ -2192,6 +2216,9 @@ function initEvents() {
     $('includeStatsHeader').checked = false;
     $('includeStats').checked = false;
     if (typeof resetDataTab === 'function') resetDataTab();
+    // Reset active tab to Model
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === 'model'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.id === 'tab-model'));
   });
 
   // Diagram controls

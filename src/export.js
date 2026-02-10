@@ -12,6 +12,7 @@ let _pbixDataModel = null; // Result from parsePbixDataModel()
 let _currentTableData = null; // { columns, columnData, rowCount }
 let _currentTableName = null;
 let _extractionAborted = false; // Signals abort when user clicks another table
+let _extractionEpoch = 0; // Monotonic counter — incremented to cancel previous extractions
 
 // ============================================================
 // CSV Export
@@ -194,9 +195,8 @@ async function selectDataTable(tableName) {
   const csvBtn = document.getElementById('exportCsvBtn');
   const parquetBtn = document.getElementById('exportParquetBtn');
 
-  // Abort any in-progress extraction, then start fresh
-  _extractionAborted = true;
-  await new Promise(r => setTimeout(r, 10));
+  // Cancel any in-progress extraction via epoch counter (no timing dependency)
+  const epoch = ++_extractionEpoch;
   _extractionAborted = false;
 
   // Highlight selected
@@ -213,12 +213,12 @@ async function selectDataTable(tableName) {
 
   try {
     const data = await _pbixDataModel.getTableStreaming(tableName, (colIdx, total, colName) => {
-      if (_extractionAborted) throw new Error('__aborted__');
+      if (epoch !== _extractionEpoch) throw new Error('__aborted__');
       const pct = Math.round((colIdx / total) * 100);
       statusEl.textContent = 'Extracting ' + tableName + '... column ' + (colIdx + 1) + '/' + total + ' (' + pct + '%)';
     });
 
-    if (_extractionAborted) return;
+    if (epoch !== _extractionEpoch) return;
 
     _currentTableData = data;
     _currentTableName = tableName;
