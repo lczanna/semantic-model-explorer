@@ -32,6 +32,16 @@ Parses `.pbit` template files (ZIP with UTF-16LE encoded schema), including auto
 
 ![PBIT Diagram - MDATP device/alert relationships](docs/screenshots/06-pbit-diagram.png)
 
+### PBIX Data Extraction
+
+Full `.pbix` support with VertiPaq data extraction via XPress9 WASM decompression. Browse the model metadata just like `.bim` files, plus extract actual table row data through the **Data tab**.
+
+![PBIX Model - Revenue_Opportunities (8 tables, 6 measures, 5 relationships)](docs/screenshots/07-pbix-model.png)
+
+Preview data, then export to **CSV** or **Parquet**. Internal tables (H$, R$, U$, auto-date) are automatically filtered out. Extraction streams column-by-column so the UI stays responsive even with large tables.
+
+![Data Tab - Fact table preview with 458 rows, export to CSV/Parquet](docs/screenshots/08-pbix-data-tab.png)
+
 ## Supported Formats
 
 | Format | Extension | Description |
@@ -40,7 +50,7 @@ Parses `.pbit` template files (ZIP with UTF-16LE encoded schema), including auto
 | PBIT | `.pbit` | Power BI Template (ZIP with DataModelSchema) |
 | TMDL | `.zip` | Tabular Model Definition Language (zipped folder) |
 | PBIP | `.pbip` | Power BI Project (zipped) |
-| PBIX | `.pbix` | Power BI file (metadata only, data is XPress9 compressed) |
+| PBIX | `.pbix` | Power BI file with full data extraction (XPress9 + VertiPaq) |
 
 ## Copy All Output
 
@@ -83,10 +93,20 @@ Token estimates help plan LLM context window usage.
 
 ## Architecture
 
-- **Single HTML file** (~553 KB) with all dependencies bundled inline
+- **Single HTML file** (~716 KB) assembled from modular sources by `scripts/build.py`
 - **Zero network requests** - works fully offline, strict CSP
 - [JSZip](https://stuk.github.io/jszip/) for ZIP extraction (PBIT/TMDL/PBIP)
 - [Cytoscape.js](https://js.cytoscape.org/) for the relationship diagram
+- XPress9 WASM for .pbix DataModel decompression (VertiPaq columnar storage)
+- [hyparquet-writer](https://github.com/hyparam/hyparquet) for Parquet export
+
+### Build
+
+```bash
+python scripts/build.py
+```
+
+Assembles `src/` source files + `lib/` dependencies into `semantic-model-explorer.html`.
 
 Inspired by [Power Query Explorer](https://github.com/lczanna/power-query-explorer).
 
@@ -99,9 +119,10 @@ pip install playwright pytest pytest-playwright
 python -m pytest scripts/run_tests.py -v --browser chromium
 ```
 
-42 Playwright tests cover:
-- **File parsing**: BIM, PBIT, TMDL formats with generated and real-world files
-- **Downloaded test files**: AdventureWorks.bim (TabularEditor), AsPartitionProcessing.bim (Microsoft), MDATP_Status_Board.pbit (Microsoft), TMDL Sales model (Microsoft SamplePBIP)
+53 Playwright tests cover:
+- **File parsing**: BIM, PBIT, TMDL, PBIX formats with generated and real-world files
+- **Downloaded test files**: AdventureWorks.bim, AsPartitionProcessing.bim, MDATP_Status_Board.pbit, TMDL Sales model, Revenue_Opportunities.pbix, Corporate_Spend.pbix
+- **PBIX data extraction**: VertiPaq decoding, Data tab UI, internal table filtering, CSV export, export button state
 - **UI interactions**: tab switching, search, select all, detail panel, copy
 - **Diagram rendering**: node/edge count, search filtering
 - **Error handling**: invalid files, empty JSON
@@ -130,6 +151,8 @@ Test files from Microsoft and community repos:
 | `AsPartitionProcessing.bim` | [Microsoft Analysis Services](https://github.com/microsoft/Analysis-Services) | 9 tables, 21 measures, 13 relationships |
 | `MDATP_Status_Board.pbit` | [Microsoft MDE-PowerBI-Templates](https://github.com/microsoft/MDE-PowerBI-Templates) | 29 tables, 7 measures, 27 relationships |
 | `tmdl-sales/` | [Microsoft Analysis Services SamplePBIP](https://github.com/microsoft/Analysis-Services) | 11 tables with measures, relationships, calculation groups |
+| `Revenue_Opportunities.pbix` | [Microsoft Power BI Samples](https://github.com/microsoft/powerbi-desktop-samples) | 8 tables, 6 measures, 5 relationships (with VertiPaq data) |
+| `Corporate_Spend.pbix` | [Microsoft Power BI Samples](https://github.com/microsoft/powerbi-desktop-samples) | Multi-table model with VertiPaq data |
 
 ## License
 

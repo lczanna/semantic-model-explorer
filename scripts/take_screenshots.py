@@ -129,9 +129,65 @@ def take_screenshots():
     time.sleep(1.5)
 
     page.screenshot(path=os.path.join(SCREENSHOTS, "06-pbit-diagram.png"))
-    print("6/6 PBIT diagram screenshot taken")
+    print("6/8 PBIT diagram screenshot taken")
     ctx.close()
     browser.close()
+
+    # ── 7. PBIX Model tab with Revenue_Opportunities ──
+    pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
+    if os.path.exists(pbix_path):
+        browser = pw.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--single-process"],
+        )
+        ctx = browser.new_context(viewport={"width": 1440, "height": 900})
+        page = ctx.new_page()
+        page.goto(f"file://{HTML_PATH}", wait_until="load")
+        time.sleep(1)
+        page.set_input_files("#fileInput", pbix_path)
+        page.wait_for_selector("#appWrap", state="visible", timeout=30000)
+        time.sleep(0.5)
+
+        page.check("#selectAll")
+        time.sleep(0.3)
+
+        page.screenshot(path=os.path.join(SCREENSHOTS, "07-pbix-model.png"))
+        print("7/8 PBIX model tab screenshot taken")
+        ctx.close()
+        browser.close()
+
+        # ── 8. PBIX Data tab showing table data preview ──
+        browser = pw.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--single-process"],
+        )
+        ctx = browser.new_context(viewport={"width": 1440, "height": 900})
+        page = ctx.new_page()
+        page.goto(f"file://{HTML_PATH}", wait_until="load")
+        time.sleep(1)
+        page.set_input_files("#fileInput", pbix_path)
+        page.wait_for_selector("#appWrap", state="visible", timeout=30000)
+        time.sleep(0.5)
+
+        page.click('.tab-btn[data-tab="data"]')
+        time.sleep(0.5)
+
+        # Click the Fact table (largest table with most data)
+        items = page.query_selector_all("#dataTableList .data-table-item")
+        for item in items:
+            if item.text_content() == "Fact":
+                item.click()
+                break
+
+        page.wait_for_selector(".data-table th", timeout=30000)
+        time.sleep(0.5)
+
+        page.screenshot(path=os.path.join(SCREENSHOTS, "08-pbix-data-tab.png"))
+        print("8/8 PBIX data tab screenshot taken")
+        ctx.close()
+        browser.close()
+    else:
+        print("7-8/8 SKIPPED (Revenue_Opportunities.pbix not available)")
 
     pw.stop()
     print(f"\nAll screenshots saved to {SCREENSHOTS}/")

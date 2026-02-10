@@ -1035,90 +1035,135 @@ function convertColumnValue(value, dataType) {
 }
 
 // ============================================================
-// Main: Extract Table Data from ABF
+// Main: Extract Table Data
 // ============================================================
 
 /**
- * Extract all row data for a given table from the ABF structure.
- *
- * @param {string} tableName
- * @param {Map} schema - from buildSchemaFromSQLite()
- * @param {Object} abf - from parseABF()
- * @returns {{ columns: string[], rows: any[][], rowCount: number }}
+ * Pre-extract all file slices needed by the schema from the ABF,
+ * returning a compact Map<filename, Uint8Array>. After this,
+ * the large decompressed ABF buffer can be released.
  */
-function extractTableData(tableName, schema, abf) {
+function _buildFileCache(schema, abf) {
+  const cache = new Map();
+  const _get = (name) => {
+    if (cache.has(name)) return;
+    try { cache.set(name, getDataSlice(abf, name)); } catch (e) { /* skip missing */ }
+  };
+  for (const [, tableInfo] of schema) {
+    for (const col of tableInfo.columns) {
+      _get(col.idf);
+      _get(col.idf + 'meta');
+      if (col.dictionary) _get(col.dictionary);
+    }
+  }
+  return cache;
+}
+
+/**
+ * Extract a single column's decoded values from the file cache.
+ * @param {Map} fileCache - Map<filename, Uint8Array>
+ * @returns {any[]|null} Decoded values, or null on failure.
+ */
+function _extractColumn(col, fileCache) {
+  let meta;
+  try {
+    const metaBuf = fileCache.get(col.idf + 'meta');
+    if (!metaBuf) return null;
+    meta = readIdfMeta(metaBuf);
+  } catch (e) { return null; }
+
+  const idfBuf = fileCache.get(col.idf);
+  if (!idfBuf) return null;
+
+  const indices = decodeRleBitPackedHybrid(readIdf(idfBuf), meta);
+
+  if (col.dictionary) {
+    try {
+      const dictBuf = fileCache.get(col.dictionary);
+      if (!dictBuf) return indices;
+      const dict = readDictionary(dictBuf, meta.minDataId);
+      return indices.map(idx => {
+        const v = dict.get(idx);
+        return v !== undefined ? convertColumnValue(v, col.dataType) : null;
+      });
+    } catch (e) { return indices; }
+  } else if (col.hidx) {
+    return indices.map(idx => convertColumnValue((idx + col.baseId) / col.magnitude, col.dataType));
+  }
+  return indices;
+}
+
+/**
+ * Extract table data synchronously — all columns at once.
+ * Returns columnar format (no row transposition) for memory efficiency.
+ *
+ * @returns {{ columns: string[], columnData: any[][], rowCount: number }}
+ */
+function extractTableData(tableName, schema, fileCache) {
   const tableSchema = schema.get(tableName);
   if (!tableSchema) throw new Error('Table not found in schema: ' + tableName);
 
-  const columnNames = [];
+  const columns = [];
   const columnData = [];
 
   for (const col of tableSchema.columns) {
-    // Read idfmeta
-    let meta;
-    try {
-      const idfmetaBuf = getDataSlice(abf, col.idf + 'meta');
-      meta = readIdfMeta(idfmetaBuf);
-    } catch (e) {
-      // Skip columns with missing metadata
-      continue;
-    }
-
-    // Read IDF
-    let idfBuf;
-    try {
-      idfBuf = getDataSlice(abf, col.idf);
-    } catch (e) {
-      continue;
-    }
-
-    const idfData = readIdf(idfBuf);
-    const indices = decodeRleBitPackedHybrid(idfData, meta);
-
-    let values;
-
-    if (col.dictionary) {
-      // Dictionary-encoded column
-      try {
-        const dictBuf = getDataSlice(abf, col.dictionary);
-        const nullAdj = col.isNullable ? 1 : 0;
-        const dict = readDictionary(dictBuf, meta.minDataId);
-        values = indices.map(idx => {
-          const v = dict.get(idx);
-          return v !== undefined ? convertColumnValue(v, col.dataType) : null;
-        });
-      } catch (e) {
-        // If dictionary read fails, use raw indices
-        values = indices;
-      }
-    } else if (col.hidx) {
-      // Numeric column with BaseId/Magnitude
-      values = indices.map(idx => {
-        const raw = (idx + col.baseId) / col.magnitude;
-        return convertColumnValue(raw, col.dataType);
-      });
-    } else {
-      values = indices;
-    }
-
-    columnNames.push(col.name);
+    const values = _extractColumn(col, fileCache);
+    if (values === null) continue;
+    columns.push(col.name);
     columnData.push(values);
   }
 
-  // Determine row count from longest column
-  const rowCount = columnData.reduce((max, col) => Math.max(max, col.length), 0);
+  const rowCount = columnData.reduce((max, c) => Math.max(max, c.length), 0);
+  return { columns, columnData, rowCount };
+}
 
-  // Build rows (transpose columns → rows)
+/**
+ * Extract table data with streaming — decodes one column at a time,
+ * yielding to the event loop between columns so the UI stays responsive.
+ *
+ * @param {Function} onProgress - (colIndex, totalCols, colName) => void
+ * @returns {Promise<{ columns: string[], columnData: any[][], rowCount: number }>}
+ */
+async function extractTableDataStreaming(tableName, schema, fileCache, onProgress) {
+  const tableSchema = schema.get(tableName);
+  if (!tableSchema) throw new Error('Table not found in schema: ' + tableName);
+
+  const columns = [];
+  const columnData = [];
+  const totalCols = tableSchema.columns.length;
+
+  for (let i = 0; i < totalCols; i++) {
+    const col = tableSchema.columns[i];
+    if (onProgress) onProgress(i, totalCols, col.name);
+    // Yield to event loop between columns
+    await new Promise(r => setTimeout(r, 0));
+
+    const values = _extractColumn(col, fileCache);
+    if (values === null) continue;
+    columns.push(col.name);
+    columnData.push(values);
+  }
+
+  const rowCount = columnData.reduce((max, c) => Math.max(max, c.length), 0);
+  return { columns, columnData, rowCount };
+}
+
+/**
+ * Get a slice of rows from columnar data (on-demand transposition).
+ * @returns {any[][]}
+ */
+function getRowSlice(tableData, start, count) {
+  const { columnData, rowCount } = tableData;
+  const end = Math.min(start + count, rowCount);
   const rows = [];
-  for (let r = 0; r < rowCount; r++) {
+  for (let r = start; r < end; r++) {
     const row = [];
     for (let c = 0; c < columnData.length; c++) {
       row.push(r < columnData[c].length ? columnData[c][r] : null);
     }
     rows.push(row);
   }
-
-  return { columns: columnNames, rows, rowCount };
+  return rows;
 }
 
 // ============================================================
@@ -1127,35 +1172,37 @@ function extractTableData(tableName, schema, abf) {
 
 /**
  * Decompress and parse a .pbix DataModel blob.
- * Returns an object with methods to list tables and extract data.
+ *
+ * After building the schema, pre-extracts only the needed file slices
+ * (IDF, dictionaries) into a compact cache and releases the large
+ * decompressed ABF buffer so it can be garbage-collected.
  *
  * @param {ArrayBuffer} dataModelBuf - Raw DataModel from .pbix ZIP
- * @returns {Promise<{ tableNames: string[], getTable: (name) => {...}, schema: Map }>}
+ * @returns {Promise<{ tableNames, schema, getTable, getTableStreaming }>}
  */
 async function parsePbixDataModel(dataModelBuf) {
-  // Step 1: XPress9 decompress
   const decompressed = await decompressXpress9(dataModelBuf);
-
-  // Step 2: Parse ABF structure
   const abf = parseABF(decompressed);
-
-  // Step 3: Extract metadata.sqlitedb
   const sqliteBuf = getDataSlice(abf, 'metadata.sqlitedb');
-
-  // Step 4: Read SQLite tables
   const db = readSQLiteTables(sqliteBuf);
-
-  // Step 5: Build column schema
   const schema = buildSchemaFromSQLite(db);
 
-  // Step 6: Get table names (sorted)
+  // Pre-extract needed file slices, then release the large decompressed buffer
+  const fileCache = _buildFileCache(schema, abf);
+  abf.data = null; // allow GC of the decompressed DataModel
+
   const tableNames = Array.from(schema.keys()).sort();
 
   return {
     tableNames,
     schema,
+    /** Synchronous extraction — blocks until complete. */
     getTable(tableName) {
-      return extractTableData(tableName, schema, abf);
+      return extractTableData(tableName, schema, fileCache);
+    },
+    /** Streaming extraction — yields between columns for UI responsiveness. */
+    getTableStreaming(tableName, onProgress) {
+      return extractTableDataStreaming(tableName, schema, fileCache, onProgress);
     }
   };
 }

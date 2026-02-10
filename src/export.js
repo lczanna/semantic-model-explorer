@@ -1,11 +1,17 @@
 // ============================================================
 // Data Export Module — CSV + Parquet export and Data tab UI
+//
+// Data is stored in columnar format { columns, columnData, rowCount }
+// to avoid expensive row transposition and reduce memory usage.
+// Extraction uses streaming (column-at-a-time with event loop yields)
+// to keep the UI responsive for large tables.
 // ============================================================
 
 // --- State for the Data tab ---
 let _pbixDataModel = null; // Result from parsePbixDataModel()
-let _currentTableData = null; // Current extracted table { columns, rows, rowCount }
+let _currentTableData = null; // { columns, columnData, rowCount }
 let _currentTableName = null;
+let _extractionAborted = false; // Signals abort when user clicks another table
 
 // ============================================================
 // CSV Export
@@ -20,17 +26,53 @@ function escapeCSVField(val) {
   return s;
 }
 
+/**
+ * Build CSV string from columnar data (small tables).
+ */
 function tableToCSV(tableData) {
-  const { columns, rows } = tableData;
+  const { columns, columnData, rowCount } = tableData;
   const lines = [];
   lines.push(columns.map(escapeCSVField).join(','));
-  for (const row of rows) {
-    lines.push(row.map(v => {
-      if (v instanceof Date) return v.toISOString();
-      return escapeCSVField(v);
-    }).join(','));
+  for (let r = 0; r < rowCount; r++) {
+    const fields = [];
+    for (let c = 0; c < columnData.length; c++) {
+      const v = r < columnData[c].length ? columnData[c][r] : null;
+      if (v instanceof Date) fields.push(v.toISOString());
+      else fields.push(escapeCSVField(v));
+    }
+    lines.push(fields.join(','));
   }
   return lines.join('\n');
+}
+
+/**
+ * Stream CSV export for large tables — writes in 50k-row chunks.
+ */
+async function exportCSVStreaming(tableName, tableData) {
+  const { columns, columnData, rowCount } = tableData;
+  const CHUNK = 50000;
+  const parts = [];
+
+  parts.push(columns.map(escapeCSVField).join(',') + '\n');
+
+  for (let start = 0; start < rowCount; start += CHUNK) {
+    const end = Math.min(start + CHUNK, rowCount);
+    const lines = [];
+    for (let r = start; r < end; r++) {
+      const fields = [];
+      for (let c = 0; c < columnData.length; c++) {
+        const v = r < columnData[c].length ? columnData[c][r] : null;
+        if (v instanceof Date) fields.push(v.toISOString());
+        else fields.push(escapeCSVField(v));
+      }
+      lines.push(fields.join(','));
+    }
+    parts.push(lines.join('\n') + '\n');
+    if (end < rowCount) await new Promise(r => setTimeout(r, 0));
+  }
+
+  const blob = new Blob(parts, { type: 'text/csv;charset=utf-8' });
+  downloadBlob(blob, tableName + '.csv');
 }
 
 function downloadBlob(blob, filename) {
@@ -45,6 +87,10 @@ function downloadBlob(blob, filename) {
 }
 
 function exportCSV(tableName, tableData) {
+  if (tableData.rowCount > 10000) {
+    exportCSVStreaming(tableName, tableData);
+    return;
+  }
   const csv = tableToCSV(tableData);
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
   downloadBlob(blob, tableName + '.csv');
@@ -60,13 +106,10 @@ function exportParquet(tableName, tableData) {
     return;
   }
 
-  const { columns, rows } = tableData;
-  const columnData = columns.map((name, colIdx) => {
-    const data = rows.map(row => row[colIdx]);
-    return { name, data };
-  });
+  const { columns, columnData } = tableData;
+  const parquetCols = columns.map((name, i) => ({ name, data: columnData[i] }));
 
-  const buffer = HyparquetWriter.parquetWriteBuffer({ columnData });
+  const buffer = HyparquetWriter.parquetWriteBuffer({ columnData: parquetCols });
   const blob = new Blob([buffer], { type: 'application/octet-stream' });
   downloadBlob(blob, tableName + '.parquet');
 }
@@ -78,14 +121,11 @@ function exportParquet(tableName, tableData) {
 function initDataTab(pbixDataModel) {
   _pbixDataModel = pbixDataModel;
 
-  // Show the Data tab button
   const dataTabBtn = document.getElementById('dataTabBtn');
   if (dataTabBtn) dataTabBtn.style.display = '';
 
-  // Render table list in sidebar
   renderDataTableList();
 
-  // Wire up export buttons
   document.getElementById('exportCsvBtn').addEventListener('click', () => {
     if (_currentTableData && _currentTableName) {
       exportCSV(_currentTableName, _currentTableData);
@@ -123,6 +163,11 @@ async function selectDataTable(tableName) {
   const csvBtn = document.getElementById('exportCsvBtn');
   const parquetBtn = document.getElementById('exportParquetBtn');
 
+  // Abort any in-progress extraction, then start fresh
+  _extractionAborted = true;
+  await new Promise(r => setTimeout(r, 10));
+  _extractionAborted = false;
+
   // Highlight selected
   document.querySelectorAll('.data-table-item').forEach(el => {
     el.classList.toggle('active', el.textContent === tableName);
@@ -135,11 +180,15 @@ async function selectDataTable(tableName) {
   previewEl.innerHTML = '<div class="detail-empty">Loading table data...</div>';
   statusEl.textContent = 'Extracting ' + tableName + '...';
 
-  // Use setTimeout to allow UI to update before heavy computation
-  await new Promise(r => setTimeout(r, 10));
-
   try {
-    const data = _pbixDataModel.getTable(tableName);
+    const data = await _pbixDataModel.getTableStreaming(tableName, (colIdx, total, colName) => {
+      if (_extractionAborted) throw new Error('__aborted__');
+      const pct = Math.round((colIdx / total) * 100);
+      statusEl.textContent = 'Extracting ' + tableName + '... column ' + (colIdx + 1) + '/' + total + ' (' + pct + '%)';
+    });
+
+    if (_extractionAborted) return;
+
     _currentTableData = data;
     _currentTableName = tableName;
 
@@ -150,6 +199,7 @@ async function selectDataTable(tableName) {
 
     renderDataPreview(data);
   } catch (e) {
+    if (e.message === '__aborted__') return;
     previewEl.innerHTML = '<div class="detail-empty" style="color:var(--err);">Error: ' + escHtml(e.message) + '</div>';
     statusEl.textContent = 'Failed to extract table data';
     _currentTableData = null;
@@ -162,8 +212,8 @@ function renderDataPreview(tableData, maxRows) {
   const previewEl = document.getElementById('dataPreview');
   if (!previewEl) return;
 
-  const { columns, rows, rowCount } = tableData;
-  const displayRows = rows.slice(0, maxRows);
+  const { columns, columnData, rowCount } = tableData;
+  const displayCount = Math.min(maxRows, rowCount);
 
   let html = '<table class="data-table"><thead><tr>';
   for (const col of columns) {
@@ -171,9 +221,10 @@ function renderDataPreview(tableData, maxRows) {
   }
   html += '</tr></thead><tbody>';
 
-  for (const row of displayRows) {
+  for (let r = 0; r < displayCount; r++) {
     html += '<tr>';
-    for (const val of row) {
+    for (let c = 0; c < columnData.length; c++) {
+      const val = r < columnData[c].length ? columnData[c][r] : null;
       let display;
       if (val == null) {
         display = '<span class="null-val">null</span>';

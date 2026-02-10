@@ -817,12 +817,19 @@ async function parsePbix(arrayBuffer) {
     const schema = buildSchemaFromSQLite(db);
     const tableNames = Array.from(schema.keys()).sort();
 
-    // Store for Data tab (synchronous — data already decompressed)
+    // Pre-extract needed file slices, then release the large decompressed buffer
+    const fileCache = _buildFileCache(schema, abf);
+    abf.data = null; // allow GC of the decompressed DataModel
+
+    // Store for Data tab
     model._pbixDataModel = {
       tableNames,
       schema,
       getTable(tableName) {
-        return extractTableData(tableName, schema, abf);
+        return extractTableData(tableName, schema, fileCache);
+      },
+      getTableStreaming(tableName, onProgress) {
+        return extractTableDataStreaming(tableName, schema, fileCache, onProgress);
       }
     };
 
