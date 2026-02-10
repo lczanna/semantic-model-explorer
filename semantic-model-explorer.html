@@ -335,7 +335,8 @@ body::before {
 
     <div class="footer-note">
       <div>Files never leave your browser. You can also download this page as <code>semantic-model-explorer.html</code> and use it offline.</div>
-      <div>Built by <a href="https://github.com/lczanna" target="_blank" rel="noopener">lczanna</a> with JSZip, Cytoscape.js, and XPress9.</div>
+      <div>Built with JSZip, Cytoscape.js, and XPress9.</div>
+      <div>&copy; 2025 <a href="https://www.linkedin.com/in/lucazanna/" target="_blank" rel="noopener noreferrer">Luca Zanna</a></div>
     </div>
   </div>
 </div>
@@ -1334,7 +1335,7 @@ async function parsePbix(arrayBuffer) {
  * Column indices from CREATE TABLE SQL:
  *   Table: rowid=ID, [2]=Name, [4]=Description, [5]=IsHidden
  *   Column: rowid=ID, [1]=TableID, [2]=ExplicitName, [4]=ExplicitDataType,
- *     [7]=Description, [8]=IsHidden, [19]=Type
+ *     [7]=Description, [8]=IsHidden, [19]=Type, [22]=Expression
  *   Measure: rowid=ID, [1]=TableID, [2]=Name, [3]=Description, [5]=Expression
  */
 function buildModelFromSQLite(db) {
@@ -1370,7 +1371,7 @@ function buildModelFromSQLite(db) {
       description: r.values[7] || '',
       dataType: mapSQLiteDataType(r.values[4]),
       isHidden: !!r.values[8],
-      expression: ''
+      expression: r.values[22] || '',
     };
     if (colType === 2) col.type = 'calculated';
     table.columns.push(col);

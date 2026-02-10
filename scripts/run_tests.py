@@ -1118,6 +1118,44 @@ class TestDataProfile:
 
         assert "**Data profile**" not in md
 
+    def test_pbix_calc_column_dax_extracted(self, app: Page):
+        """Test that calculated column DAX expressions are extracted from .pbix."""
+        pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
+        if not os.path.exists(pbix_path):
+            pytest.skip("Revenue_Opportunities.pbix not available")
+
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+
+        calc_cols = app.evaluate("""() => {
+            const result = [];
+            for (const t of appState.model.tables) {
+                for (const c of t.columns) {
+                    if (c.type === 'calculated' && c.expression) {
+                        result.push(t.name + '.' + c.name + '=' + c.expression);
+                    }
+                }
+            }
+            return result;
+        }""")
+
+        assert len(calc_cols) > 0, "Should have extracted calc column DAX"
+
+    def test_pbix_calc_column_in_markdown(self, app: Page):
+        """Test that calculated column DAX appears in Markdown for .pbix files."""
+        pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
+        if not os.path.exists(pbix_path):
+            pytest.skip("Revenue_Opportunities.pbix not available")
+
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+
+        md = app.evaluate("() => modelToMarkdown(appState.model, null)")
+
+        assert "(calculated column)" in md, "Markdown should show calculated columns"
+        assert "EstimatedCloseDate" in md, \
+            "Markdown should contain calc column DAX expressions"
+
     def test_stats_checkbox_syncs(self, app: Page):
         """Test that header and footer stats checkboxes stay in sync."""
         pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")

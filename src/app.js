@@ -850,7 +850,7 @@ async function parsePbix(arrayBuffer) {
  * Column indices from CREATE TABLE SQL:
  *   Table: rowid=ID, [2]=Name, [4]=Description, [5]=IsHidden
  *   Column: rowid=ID, [1]=TableID, [2]=ExplicitName, [4]=ExplicitDataType,
- *     [7]=Description, [8]=IsHidden, [19]=Type
+ *     [7]=Description, [8]=IsHidden, [19]=Type, [22]=Expression
  *   Measure: rowid=ID, [1]=TableID, [2]=Name, [3]=Description, [5]=Expression
  */
 function buildModelFromSQLite(db) {
@@ -886,7 +886,7 @@ function buildModelFromSQLite(db) {
       description: r.values[7] || '',
       dataType: mapSQLiteDataType(r.values[4]),
       isHidden: !!r.values[8],
-      expression: ''
+      expression: r.values[22] || '',
     };
     if (colType === 2) col.type = 'calculated';
     table.columns.push(col);
