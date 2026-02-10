@@ -4188,27 +4188,36 @@ function exportParquet(tableName, tableData) {
 // Data Tab UI
 // ============================================================
 
+let _dataTabInitialized = false;
+
 function initDataTab(pbixDataModel) {
   _pbixDataModel = pbixDataModel;
+  _currentTableData = null;
+  _currentTableName = null;
 
   const dataTabBtn = document.getElementById('dataTabBtn');
   if (dataTabBtn) dataTabBtn.style.display = '';
 
   renderDataTableList();
 
-  document.getElementById('exportCsvBtn').addEventListener('click', () => {
-    if (_currentTableData && _currentTableName) {
-      exportCSV(_currentTableName, _currentTableData);
-      toast('Exported ' + _currentTableName + '.csv');
-    }
-  });
+  // Only attach listeners once to avoid duplicate handlers on re-init
+  if (!_dataTabInitialized) {
+    _dataTabInitialized = true;
 
-  document.getElementById('exportParquetBtn').addEventListener('click', () => {
-    if (_currentTableData && _currentTableName) {
-      exportParquet(_currentTableName, _currentTableData);
-      toast('Exported ' + _currentTableName + '.parquet');
-    }
-  });
+    document.getElementById('exportCsvBtn').addEventListener('click', () => {
+      if (_currentTableData && _currentTableName) {
+        exportCSV(_currentTableName, _currentTableData);
+        toast('Exported ' + _currentTableName + '.csv');
+      }
+    });
+
+    document.getElementById('exportParquetBtn').addEventListener('click', () => {
+      if (_currentTableData && _currentTableName) {
+        exportParquet(_currentTableName, _currentTableData);
+        toast('Exported ' + _currentTableName + '.parquet');
+      }
+    });
+  }
 }
 
 function renderDataTableList() {

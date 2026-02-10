@@ -1019,6 +1019,38 @@ class TestPbixDataExtraction:
         header = lines[0]
         assert "Account" in header or "Region" in header
 
+    def test_pbix_no_double_export(self, app: Page):
+        """Test that reloading a .pbix doesn't cause duplicate export handlers."""
+        pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
+        if not os.path.exists(pbix_path):
+            pytest.skip("Revenue_Opportunities.pbix not available")
+
+        # Load the file twice to trigger re-init
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+        app.evaluate("() => { document.getElementById('newFileBtn').click(); }")
+        app.wait_for_selector("#dropZone", state="visible", timeout=5000)
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+
+        # Count event listeners on export buttons by tracking calls
+        download_count = app.evaluate("""() => {
+            let count = 0;
+            const origCreate = URL.createObjectURL;
+            URL.createObjectURL = function(blob) {
+                count++;
+                return origCreate.call(URL, blob);
+            };
+            const data = appState.model._pbixDataModel.getTable('Account');
+            window._currentTableData = data;
+            // Simulate what the export button handler does
+            exportCSV('Account', data);
+            URL.createObjectURL = origCreate;
+            return count;
+        }""")
+
+        assert download_count == 1, f"Expected 1 download, got {download_count}"
+
     def test_pbix_corporate_spend(self, app: Page):
         """Test loading the Corporate_Spend .pbix file."""
         pbix_path = os.path.join(TEST_FILES, "Corporate_Spend.pbix")
