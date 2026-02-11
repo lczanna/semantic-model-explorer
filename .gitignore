@@ -3,3 +3,4 @@ __pycache__/
 .pytest_cache/
 data/test-files/empty.bim
 data/test-files/invalid.txt
+screenshots/

@@ -53,6 +53,14 @@ async function copyText(text) {
 
 function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
+let _htmlEntityDecoder = null;
+function decodeHtmlEntities(s) {
+  if (s == null || typeof s !== 'string' || !s.includes('&')) return s;
+  if (!_htmlEntityDecoder) _htmlEntityDecoder = document.createElement('div');
+  _htmlEntityDecoder.innerHTML = s;
+  return _htmlEntityDecoder.textContent || '';
+}
+
 function estimateTokens(text) {
   // Rough estimate: ~4 chars per token for English/code
   return Math.round(text.length / 4);
@@ -882,7 +890,7 @@ function buildModelFromSQLite(db) {
   const tableMap = new Map();
 
   for (const r of tableRows) {
-    const name = r.values[2] || 'Table_' + r.rowid;
+    const name = decodeHtmlEntities(r.values[2] || '') || ('Table_' + r.rowid);
     // Skip internal tables (auto-date, hierarchy, relationship, utility)
     if (name.startsWith('LocalDateTable_') ||
         name.startsWith('DateTableTemplate_') ||
@@ -891,7 +899,7 @@ function buildModelFromSQLite(db) {
         name.startsWith('U$')) continue;
     const t = emptyTable();
     t.name = name;
-    t.description = r.values[4] || '';
+    t.description = decodeHtmlEntities(r.values[4] || '');
     t.isHidden = !!r.values[5];
     model.tables.push(t);
     tableMap.set(r.rowid, t);
@@ -904,11 +912,11 @@ function buildModelFromSQLite(db) {
     const colType = r.values[19];
     if (colType === 3) continue;
     const col = {
-      name: r.values[2] || '',
-      description: r.values[7] || '',
+      name: decodeHtmlEntities(r.values[2] || ''),
+      description: decodeHtmlEntities(r.values[7] || ''),
       dataType: mapSQLiteDataType(r.values[4]),
       isHidden: !!r.values[8],
-      expression: r.values[22] || '',
+      expression: decodeHtmlEntities(r.values[22] || ''),
     };
     if (colType === 2) col.type = 'calculated';
     table.columns.push(col);
@@ -919,10 +927,10 @@ function buildModelFromSQLite(db) {
     const table = tableMap.get(r.values[1]);
     if (!table) continue;
     table.measures.push({
-      name: r.values[2] || '',
-      description: r.values[3] || '',
-      expression: r.values[5] || '',
-      formatString: r.values[6] || '',
+      name: decodeHtmlEntities(r.values[2] || ''),
+      description: decodeHtmlEntities(r.values[3] || ''),
+      expression: decodeHtmlEntities(r.values[5] || ''),
+      formatString: decodeHtmlEntities(r.values[6] || ''),
       isHidden: !!r.values[7]
     });
   }
@@ -935,11 +943,11 @@ function buildModelFromSQLite(db) {
   const relRows = db.getTableRows('Relationship');
   const colIdToName = new Map();
   for (const r of columnRows) {
-    colIdToName.set(r.rowid, r.values[2]);
+    colIdToName.set(r.rowid, decodeHtmlEntities(r.values[2] || ''));
   }
   const tableIdToName = new Map();
   for (const r of tableRows) {
-    tableIdToName.set(r.rowid, r.values[2]);
+    tableIdToName.set(r.rowid, decodeHtmlEntities(r.values[2] || ''));
   }
 
   for (const r of relRows) {
@@ -967,13 +975,13 @@ function buildModelFromSQLite(db) {
   const roleRows = db.getTableRows('Role');
   const tablePermRows = db.getTableRows('TablePermission');
   for (const r of roleRows) {
-    const role = { name: r.values[2] || '', modelPermission: 'read', tablePermissions: [] };
+    const role = { name: decodeHtmlEntities(r.values[2] || ''), modelPermission: 'read', tablePermissions: [] };
     if (tablePermRows) {
       for (const tp of tablePermRows) {
         if (tp.values[1] === r.rowid) {
           role.tablePermissions.push({
             table: tableIdToName.get(tp.values[2]) || '',
-            filterExpression: tp.values[3] || ''
+            filterExpression: decodeHtmlEntities(tp.values[3] || '')
           });
         }
       }
@@ -1775,7 +1783,13 @@ function renderRoleDetail(panel, role) {
 // Basic DAX syntax highlighting
 function highlightDax(code) {
   if (!code) return '';
-  code = escHtml(code);
+  // Keep apostrophes as plain characters so numeric highlighting
+  // doesn't split HTML entities like &#39; into visible artifacts.
+  code = decodeHtmlEntities(String(code))
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
   // Comments
   code = code.replace(/(\/\/.*$)/gm, '<span class="dax-cm">$1</span>');
   code = code.replace(/(--.*$)/gm, '<span class="dax-cm">$1</span>');

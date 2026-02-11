@@ -600,6 +600,32 @@ class TestParserInternals:
         # ~28 chars / 4 = ~7 tokens
         assert 5 <= result <= 10
 
+    def test_measure_render_decodes_html_entities(self, app: Page):
+        """Test that encoded entities in DAX render as actual characters."""
+        result = app.evaluate("""() => {
+            const panel = document.createElement('div');
+            renderMeasureDetail(
+                panel,
+                {
+                    name: "M",
+                    expression: "VAR m = SELECTEDVALUE(&#39;Calendar&#39;[Year Month Order]) RETURN m",
+                    formatString: "",
+                    displayFolder: "",
+                    description: "",
+                    isHidden: false,
+                },
+                "T"
+            );
+            return {
+                html: panel.innerHTML,
+                text: panel.textContent || "",
+            };
+        }""")
+
+        assert "&amp;#39;" not in result["html"], "Rendered HTML should not double-escape quote entities"
+        assert "&#39;" not in result["text"], "Rendered text should not show literal quote entity codes"
+        assert "'Calendar'" in result["text"], "Rendered text should show normal single quotes in DAX"
+
     def test_markdown_output_structure(self, app: Page):
         """Test that modelToMarkdown produces expected sections."""
         result = app.evaluate("""() => {

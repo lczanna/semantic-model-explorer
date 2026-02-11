@@ -169,6 +169,7 @@ body::before {
 .prompt-label { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
 .prompt-select { padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 12px; font-family: var(--font); }
 .prompt-select-secondary { background: transparent; color: var(--text2); font-size: 11px; }
+.prompt-select option { color: #1b2430; background: #ffffff; }
 .stats-toggle { font-size: 11px; display: flex; align-items: center; gap: 4px; cursor: pointer; color: var(--text2); white-space: nowrap; }
 
 /* Tree items */
