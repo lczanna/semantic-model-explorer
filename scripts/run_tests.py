@@ -964,7 +964,7 @@ class TestPbixDataExtraction:
         assert "rows" in row_count_text
 
     def test_pbix_export_buttons_enabled(self, app: Page):
-        """Test that CSV and Parquet export buttons are enabled after loading data."""
+        """Test that single-table and bulk export buttons are enabled after loading data."""
         pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
         if not os.path.exists(pbix_path):
             pytest.skip("Revenue_Opportunities.pbix not available")
@@ -981,8 +981,33 @@ class TestPbixDataExtraction:
 
         csv_disabled = app.get_attribute("#exportCsvBtn", "disabled")
         parquet_disabled = app.get_attribute("#exportParquetBtn", "disabled")
+        all_csv_disabled = app.get_attribute("#exportAllCsvBtn", "disabled")
+        all_parquet_disabled = app.get_attribute("#exportAllParquetBtn", "disabled")
         assert csv_disabled is None, "CSV button should be enabled"
         assert parquet_disabled is None, "Parquet button should be enabled"
+        assert all_csv_disabled is None, "Export All CSV button should be enabled"
+        assert all_parquet_disabled is None, "Export All Parquet button should be enabled"
+
+    def test_pbix_export_all_buttons_enabled_without_selection(self, app: Page):
+        """Test that bulk export is enabled before selecting a specific table."""
+        pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
+        if not os.path.exists(pbix_path):
+            pytest.skip("Revenue_Opportunities.pbix not available")
+
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+
+        click_tab(app, "data")
+        app.wait_for_selector("#dataTableList .data-table-item", timeout=5000)
+
+        csv_disabled = app.get_attribute("#exportCsvBtn", "disabled")
+        parquet_disabled = app.get_attribute("#exportParquetBtn", "disabled")
+        all_csv_disabled = app.get_attribute("#exportAllCsvBtn", "disabled")
+        all_parquet_disabled = app.get_attribute("#exportAllParquetBtn", "disabled")
+        assert csv_disabled is not None, "Single-table CSV button should be disabled before table selection"
+        assert parquet_disabled is not None, "Single-table Parquet button should be disabled before table selection"
+        assert all_csv_disabled is None, "Export All CSV button should be enabled"
+        assert all_parquet_disabled is None, "Export All Parquet button should be enabled"
 
     def test_pbix_relationships_correct(self, app: Page):
         """Test that .pbix relationships are correctly parsed."""

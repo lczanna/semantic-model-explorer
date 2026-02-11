@@ -13,6 +13,7 @@ let _currentTableData = null; // { columns, columnData, rowCount }
 let _currentTableName = null;
 let _extractionAborted = false; // Signals abort when user clicks another table
 let _extractionEpoch = 0; // Monotonic counter — incremented to cancel previous extractions
+let _bulkExportInProgress = false;
 
 // ============================================================
 // CSV Export
@@ -25,6 +26,11 @@ function escapeCSVField(val) {
     return '"' + s.replace(/"/g, '""') + '"';
   }
   return s;
+}
+
+function sanitizeFileName(name) {
+  if (name == null) return '';
+  return String(name).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
 }
 
 /**
@@ -47,9 +53,9 @@ function tableToCSV(tableData) {
 }
 
 /**
- * Stream CSV export for large tables — writes in 50k-row chunks.
+ * Stream CSV construction in 50k-row chunks.
  */
-async function exportCSVStreaming(tableName, tableData) {
+async function buildCSVParts(tableData, onChunk) {
   const { columns, columnData, rowCount } = tableData;
   const CHUNK = 50000;
   const parts = [];
@@ -69,8 +75,18 @@ async function exportCSVStreaming(tableName, tableData) {
       lines.push(fields.join(','));
     }
     parts.push(lines.join('\n') + '\n');
+    if (onChunk) onChunk(end, rowCount);
     if (end < rowCount) await new Promise(r => setTimeout(r, 0));
   }
+
+  return parts;
+}
+
+/**
+ * Stream CSV export for large tables — writes in 50k-row chunks.
+ */
+async function exportCSVStreaming(tableName, tableData) {
+  const parts = await buildCSVParts(tableData);
 
   const blob = new Blob(parts, { type: 'text/csv;charset=utf-8' });
   downloadBlob(blob, tableName + '.csv');
@@ -101,18 +117,124 @@ function exportCSV(tableName, tableData) {
 // Parquet Export (via hyparquet-writer)
 // ============================================================
 
+function isParquetAvailable() {
+  return typeof HyparquetWriter !== 'undefined' && !!HyparquetWriter.parquetWriteBuffer;
+}
+
+function tableToParquetBuffer(tableData) {
+  const { columns, columnData } = tableData;
+  const parquetCols = columns.map((name, i) => ({ name, data: columnData[i] }));
+  return HyparquetWriter.parquetWriteBuffer({ columnData: parquetCols });
+}
+
 function exportParquet(tableName, tableData) {
-  if (typeof HyparquetWriter === 'undefined' || !HyparquetWriter.parquetWriteBuffer) {
+  if (!isParquetAvailable()) {
     toast('Parquet writer not available');
     return;
   }
 
-  const { columns, columnData } = tableData;
-  const parquetCols = columns.map((name, i) => ({ name, data: columnData[i] }));
-
-  const buffer = HyparquetWriter.parquetWriteBuffer({ columnData: parquetCols });
+  const buffer = tableToParquetBuffer(tableData);
   const blob = new Blob([buffer], { type: 'application/octet-stream' });
   downloadBlob(blob, tableName + '.parquet');
+}
+
+// ============================================================
+// Bulk Export (all tables)
+// ============================================================
+
+function getModelExportName() {
+  const fallback = 'semantic-model';
+  if (typeof appState === 'undefined' || !appState.model || !appState.model.name) return fallback;
+  const safe = sanitizeFileName(appState.model.name).trim();
+  return safe || fallback;
+}
+
+function updateExportButtons() {
+  const csvBtn = document.getElementById('exportCsvBtn');
+  const parquetBtn = document.getElementById('exportParquetBtn');
+  const allCsvBtn = document.getElementById('exportAllCsvBtn');
+  const allParquetBtn = document.getElementById('exportAllParquetBtn');
+
+  const hasCurrentTable = !!(_currentTableData && _currentTableName);
+  const hasModel = !!_pbixDataModel;
+  const parquetReady = isParquetAvailable();
+
+  if (csvBtn) csvBtn.disabled = _bulkExportInProgress || !hasCurrentTable;
+  if (parquetBtn) parquetBtn.disabled = _bulkExportInProgress || !hasCurrentTable || !parquetReady;
+  if (allCsvBtn) allCsvBtn.disabled = _bulkExportInProgress || !hasModel;
+  if (allParquetBtn) allParquetBtn.disabled = _bulkExportInProgress || !hasModel || !parquetReady;
+}
+
+async function exportAllTables(format) {
+  if (!_pbixDataModel || _bulkExportInProgress) return;
+  if (typeof JSZip === 'undefined') {
+    toast('ZIP library not available');
+    return;
+  }
+  if (format !== 'csv' && format !== 'parquet') {
+    toast('Unknown export format: ' + format);
+    return;
+  }
+  if (format === 'parquet' && !isParquetAvailable()) {
+    toast('Parquet writer not available');
+    return;
+  }
+
+  const tableNames = _pbixDataModel.tableNames || [];
+  if (tableNames.length === 0) {
+    toast('No tables to export');
+    return;
+  }
+
+  const statusEl = document.getElementById('dataStatus');
+  _bulkExportInProgress = true;
+  _extractionEpoch++; // cancel any in-flight table preview extraction
+  updateExportButtons();
+
+  try {
+    const zip = new JSZip();
+
+    for (let i = 0; i < tableNames.length; i++) {
+      const tableName = tableNames[i];
+      const fileBase = sanitizeFileName(tableName) || ('table_' + (i + 1));
+      const prefix = 'Exporting ' + (i + 1) + '/' + tableNames.length + ': ' + tableName;
+
+      if (statusEl) statusEl.textContent = prefix + '...';
+
+      const data = await _pbixDataModel.getTableStreaming(tableName, (colIdx, total, colName) => {
+        const pct = total > 0 ? Math.round(((colIdx + 1) / total) * 100) : 100;
+        if (statusEl) statusEl.textContent = prefix + ' column ' + (colIdx + 1) + '/' + total + ' (' + pct + '%)';
+      });
+
+      if (format === 'csv') {
+        if (statusEl) statusEl.textContent = 'Building CSV ' + (i + 1) + '/' + tableNames.length + ': ' + tableName + '...';
+        const csvParts = await buildCSVParts(data);
+        zip.file(fileBase + '.csv', csvParts.join(''));
+      } else {
+        if (statusEl) statusEl.textContent = 'Building Parquet ' + (i + 1) + '/' + tableNames.length + ': ' + tableName + '...';
+        const buffer = tableToParquetBuffer(data);
+        zip.file(fileBase + '.parquet', buffer);
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+
+    if (statusEl) statusEl.textContent = 'Compressing archive...';
+    const zipBlob = await zip.generateAsync({
+      type: 'blob',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 },
+    });
+    const filename = getModelExportName() + '-tables-' + format + '.zip';
+    downloadBlob(zipBlob, filename);
+    if (statusEl) statusEl.textContent = '';
+    toast('Exported ' + tableNames.length + ' tables as ' + format.toUpperCase() + ' ZIP');
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Failed to export all tables';
+    toast('Bulk export failed: ' + (e && e.message ? e.message : 'Unknown error'));
+  } finally {
+    _bulkExportInProgress = false;
+    updateExportButtons();
+  }
 }
 
 // ============================================================
@@ -126,6 +248,8 @@ function resetDataTab() {
   _currentTableData = null;
   _currentTableName = null;
   _extractionAborted = true;
+  _bulkExportInProgress = false;
+  _extractionEpoch++;
 
   var listEl = document.getElementById('dataTableList');
   if (listEl) listEl.innerHTML = '';
@@ -137,21 +261,20 @@ function resetDataTab() {
   if (countEl) countEl.textContent = '';
   var statusEl = document.getElementById('dataStatus');
   if (statusEl) statusEl.textContent = '';
-  var csvBtn = document.getElementById('exportCsvBtn');
-  if (csvBtn) csvBtn.disabled = true;
-  var parquetBtn = document.getElementById('exportParquetBtn');
-  if (parquetBtn) parquetBtn.disabled = true;
+  updateExportButtons();
 }
 
 function initDataTab(pbixDataModel) {
   _pbixDataModel = pbixDataModel;
   _currentTableData = null;
   _currentTableName = null;
+  _bulkExportInProgress = false;
 
   const dataTabBtn = document.getElementById('dataTabBtn');
   if (dataTabBtn) dataTabBtn.style.display = '';
 
   renderDataTableList();
+  updateExportButtons();
 
   // Only attach listeners once to avoid duplicate handlers on re-init
   if (!_dataTabInitialized) {
@@ -169,6 +292,14 @@ function initDataTab(pbixDataModel) {
         exportParquet(_currentTableName, _currentTableData);
         toast('Exported ' + _currentTableName + '.parquet');
       }
+    });
+
+    document.getElementById('exportAllCsvBtn').addEventListener('click', () => {
+      exportAllTables('csv');
+    });
+
+    document.getElementById('exportAllParquetBtn').addEventListener('click', () => {
+      exportAllTables('parquet');
     });
   }
 }
@@ -188,12 +319,15 @@ function renderDataTableList() {
 }
 
 async function selectDataTable(tableName) {
+  if (_bulkExportInProgress) {
+    toast('Bulk export in progress. Please wait.');
+    return;
+  }
+
   const statusEl = document.getElementById('dataStatus');
   const previewEl = document.getElementById('dataPreview');
   const nameEl = document.getElementById('dataTableName');
   const countEl = document.getElementById('dataRowCount');
-  const csvBtn = document.getElementById('exportCsvBtn');
-  const parquetBtn = document.getElementById('exportParquetBtn');
 
   // Cancel any in-progress extraction via epoch counter (no timing dependency)
   const epoch = ++_extractionEpoch;
@@ -206,16 +340,17 @@ async function selectDataTable(tableName) {
 
   nameEl.textContent = tableName;
   countEl.textContent = '';
-  csvBtn.disabled = true;
-  parquetBtn.disabled = true;
+  _currentTableData = null;
+  _currentTableName = null;
+  updateExportButtons();
   previewEl.innerHTML = '<div class="detail-empty">Loading table data...</div>';
-  statusEl.textContent = 'Extracting ' + tableName + '...';
+  if (statusEl) statusEl.textContent = 'Extracting ' + tableName + '...';
 
   try {
     const data = await _pbixDataModel.getTableStreaming(tableName, (colIdx, total, colName) => {
       if (epoch !== _extractionEpoch) throw new Error('__aborted__');
-      const pct = Math.round((colIdx / total) * 100);
-      statusEl.textContent = 'Extracting ' + tableName + '... column ' + (colIdx + 1) + '/' + total + ' (' + pct + '%)';
+      const pct = total > 0 ? Math.round(((colIdx + 1) / total) * 100) : 100;
+      if (statusEl) statusEl.textContent = 'Extracting ' + tableName + '... column ' + (colIdx + 1) + '/' + total + ' (' + pct + '%)';
     });
 
     if (epoch !== _extractionEpoch) return;
@@ -224,17 +359,17 @@ async function selectDataTable(tableName) {
     _currentTableName = tableName;
 
     countEl.textContent = formatNum(data.rowCount) + ' rows';
-    csvBtn.disabled = false;
-    parquetBtn.disabled = false;
-    statusEl.textContent = '';
+    updateExportButtons();
+    if (statusEl) statusEl.textContent = '';
 
     renderDataPreview(data);
   } catch (e) {
     if (e.message === '__aborted__') return;
     previewEl.innerHTML = '<div class="detail-empty" style="color:var(--err);">Error: ' + escHtml(e.message) + '</div>';
-    statusEl.textContent = 'Failed to extract table data';
+    if (statusEl) statusEl.textContent = 'Failed to extract table data';
     _currentTableData = null;
     _currentTableName = null;
+    updateExportButtons();
   }
 }
 
