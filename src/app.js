@@ -10,6 +10,7 @@ const appState = {
   cy: null, // Cytoscape instance
   pbixDataModel: null, // VertiPaq data model for Data tab (set after async init)
   statsCache: null, // Map<tableName, columnStats[]> — cached after first computation
+  statsPromise: null, // In-flight Promise for stats computation to dedupe concurrent requests
 };
 
 const PROMPTS = {
@@ -1239,6 +1240,17 @@ async function computeAllStats(pbixDataModel, onProgress) {
   return statsMap;
 }
 
+async function ensureStatsCache(pbixDataModel, onProgress) {
+  if (!pbixDataModel) return null;
+  if (appState.statsCache) return appState.statsCache;
+  if (!appState.statsPromise) {
+    appState.statsPromise = computeAllStats(pbixDataModel, onProgress).finally(() => {
+      appState.statsPromise = null;
+    });
+  }
+  return appState.statsPromise;
+}
+
 /**
  * Format a stat value for display in markdown.
  */
@@ -1467,12 +1479,16 @@ function renderApp(model) {
   if (model._pbixDataModel && typeof initDataTab === 'function') {
     appState.pbixDataModel = model._pbixDataModel;
     appState.statsCache = null; // clear stats cache for new file
+    appState.statsPromise = null;
     initDataTab(model._pbixDataModel);
     // Show data profile checkboxes
     $('includeStatsHeaderWrap').style.display = '';
     $('includeStatsWrap').style.display = '';
   } else {
     // Hide Data tab and stats checkboxes for non-pbix files
+    appState.pbixDataModel = null;
+    appState.statsCache = null;
+    appState.statsPromise = null;
     const dataTabBtn = $('dataTabBtn');
     if (dataTabBtn) dataTabBtn.style.display = 'none';
     $('includeStatsHeaderWrap').style.display = 'none';
@@ -1841,6 +1857,7 @@ function renderDiagram(model) {
   if (appState.cy) {
     appState.cy.destroy();
   }
+  closeDiagramPanel();
 
   const cy = cytoscape({
     container: $('diagramContainer'),
@@ -1938,29 +1955,54 @@ function renderDiagram(model) {
     wheelSensitivity: 0.3,
   });
 
-  cy.on('tap', 'node', function(evt) {
+  function onNodeActivate(evt) {
     const nodeId = evt.target.id();
     const table = model.tables.find(t => t.name === nodeId);
     if (table) showDiagramSidePanel(table);
-  });
+  }
 
-  cy.on('tap', 'edge', function(evt) {
+  function onEdgeActivate(evt) {
     const data = evt.target.data();
     showDiagramEdgePanel(data);
-  });
+  }
 
-  cy.on('tap', function(evt) {
+  function onCanvasActivate(evt) {
     if (evt.target === cy) {
-      $('diagramSidePanel').classList.remove('open');
+      closeDiagramPanel();
       requestAnimationFrame(() => cy.resize());
     }
-  });
+  }
+
+  // Listen to both tap and click so the first interaction works consistently.
+  cy.on('tap click', 'node', onNodeActivate);
+  cy.on('tap click', 'edge', onEdgeActivate);
+  cy.on('tap click', onCanvasActivate);
 
   appState.cy = cy;
+  // Ensure viewport + hit-testing are aligned after the tab becomes visible.
+  requestAnimationFrame(() => {
+    cy.resize();
+    cy.fit(null, 40);
+  });
+}
+
+function closeDiagramPanel() {
+  const panel = $('diagramSidePanel');
+  if (!panel) return;
+  panel.classList.remove('open');
+  panel.style.display = '';
+}
+
+function openDiagramPanel(html) {
+  const panel = $('diagramSidePanel');
+  if (!panel) return;
+  panel.innerHTML = html;
+  panel.classList.add('open');
+  panel.style.display = 'block';
+  if (appState.cy) requestAnimationFrame(() => appState.cy.resize());
 }
 
 function showDiagramSidePanel(table) {
-  const panel = $('diagramSidePanel');
   let html = `<h3>${escHtml(table.name)}</h3>`;
   html += `<div class="badge badge-type" style="margin-bottom:8px">${table.type}</div>`;
 
@@ -1983,14 +2025,10 @@ function showDiagramSidePanel(table) {
     html += '</div>';
   }
 
-  panel.innerHTML = html;
-  panel.classList.add('open');
-  // Resize Cytoscape so it reflows around the newly visible panel
-  if (appState.cy) requestAnimationFrame(() => appState.cy.resize());
+  openDiagramPanel(html);
 }
 
 function showDiagramEdgePanel(data) {
-  const panel = $('diagramSidePanel');
   const fromT = data.fromTable || data.target;
   const toT = data.toTable || data.source;
   let html = `<h3>${escHtml(fromT)} → ${escHtml(toT)}</h3>`;
@@ -2001,9 +2039,7 @@ function showDiagramEdgePanel(data) {
   html += `<dt>Direction</dt><dd>${data.direction === 'both' ? 'Both' : 'Single'}</dd>`;
   html += `<dt>Active</dt><dd>${data.isActive ? 'Yes' : 'No'}</dd>`;
   html += `</dl>`;
-  panel.innerHTML = html;
-  panel.classList.add('open');
-  if (appState.cy) requestAnimationFrame(() => appState.cy.resize());
+  openDiagramPanel(html);
 }
 
 // ============================================================
@@ -2149,7 +2185,7 @@ function initEvents() {
       btn.textContent = 'Computing stats...';
       btn.disabled = true;
       try {
-        statsMap = await computeAllStats(appState.pbixDataModel, (i, total, name) => {
+        statsMap = await ensureStatsCache(appState.pbixDataModel, (i, total, name) => {
           btn.textContent = `Stats ${i + 1}/${total}...`;
         });
       } finally {
@@ -2177,7 +2213,7 @@ function initEvents() {
       btn.textContent = 'Computing stats...';
       btn.disabled = true;
       try {
-        statsMap = await computeAllStats(appState.pbixDataModel, (i, total, name) => {
+        statsMap = await ensureStatsCache(appState.pbixDataModel, (i, total, name) => {
           btn.textContent = `Stats ${i + 1}/${total}...`;
         });
       } finally {
@@ -2193,14 +2229,30 @@ function initEvents() {
   });
 
   // Sync stats checkboxes and update token badges
-  $('includeStatsHeader').addEventListener('change', () => {
-    $('includeStats').checked = $('includeStatsHeader').checked;
+  async function onStatsToggle(sourceId) {
+    const sourceChecked = $(sourceId).checked;
+    $('includeStatsHeader').checked = sourceChecked;
+    $('includeStats').checked = sourceChecked;
     updateTokenBadges();
-  });
-  $('includeStats').addEventListener('change', () => {
-    $('includeStatsHeader').checked = $('includeStats').checked;
-    updateTokenBadges();
-  });
+
+    // If stats were just enabled, compute cache immediately so token badges
+    // reflect data-profile overhead without requiring extra user actions.
+    if (sourceChecked && appState.pbixDataModel && !appState.statsCache) {
+      const badge = $('tokenBadge');
+      if (badge && !badge.textContent.includes('computing stats')) {
+        badge.textContent += ' (computing stats...)';
+      }
+      try {
+        await ensureStatsCache(appState.pbixDataModel, null);
+      } catch (e) {
+        // Keep UI responsive; copy actions can still retry and surface errors.
+      }
+      updateTokenBadges();
+    }
+  }
+
+  $('includeStatsHeader').addEventListener('change', () => { onStatsToggle('includeStatsHeader'); });
+  $('includeStats').addEventListener('change', () => { onStatsToggle('includeStats'); });
 
   // New file
   $('newFileBtn').addEventListener('click', () => {
@@ -2213,6 +2265,7 @@ function initEvents() {
     appState.selectedItem = null;
     appState.pbixDataModel = null;
     appState.statsCache = null;
+    appState.statsPromise = null;
     $('includeStatsHeader').checked = false;
     $('includeStats').checked = false;
     if (typeof resetDataTab === 'function') resetDataTab();

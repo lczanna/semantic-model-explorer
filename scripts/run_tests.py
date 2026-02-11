@@ -94,6 +94,25 @@ def click_tab(page: Page, tab_name: str):
     page.click(f'.tab-btn[data-tab="{tab_name}"]')
 
 
+def click_first_diagram_node(page: Page) -> str:
+    """Click the first Cytoscape node using rendered coordinates. Returns node id."""
+    page.wait_for_function(
+        "() => !!appState.cy && appState.cy.nodes().length > 0",
+        timeout=30000,
+    )
+    node_info = page.evaluate(
+        """() => {
+            const n = appState.cy.nodes()[0];
+            const p = n.renderedPosition();
+            return { id: n.id(), x: p.x, y: p.y };
+        }"""
+    )
+    box = page.locator("#diagramContainer").bounding_box()
+    assert box is not None, "Diagram container should have a bounding box"
+    page.mouse.click(box["x"] + node_info["x"], box["y"] + node_info["y"])
+    return node_info["id"]
+
+
 def count_tree_items(page: Page, section: str = None) -> int:
     """Count visible tree items, optionally filtered by section."""
     items = page.query_selector_all(".tree-item")
@@ -963,6 +982,28 @@ class TestPbixDataExtraction:
         row_count_text = app.text_content("#dataRowCount")
         assert "rows" in row_count_text
 
+    def test_pbix_diagram_side_panel_opens_on_first_visit(self, app: Page):
+        """Test diagram side panel opens on the first diagram visit (no tab switch workaround)."""
+        pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
+        if not os.path.exists(pbix_path):
+            pytest.skip("Revenue_Opportunities.pbix not available")
+
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+
+        click_tab(app, "diagram")
+        app.wait_for_timeout(400)
+
+        node_id = click_first_diagram_node(app)
+        app.wait_for_function(
+            "() => document.getElementById('diagramSidePanel').classList.contains('open')",
+            timeout=5000,
+        )
+
+        panel_text = app.text_content("#diagramSidePanel")
+        assert panel_text is not None and node_id in panel_text, \
+            "Side panel should open with clicked table details on first diagram visit"
+
     def test_pbix_export_buttons_enabled(self, app: Page):
         """Test that single-table and bulk export buttons are enabled after loading data."""
         pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
@@ -1230,6 +1271,27 @@ class TestDataProfile:
             "() => document.getElementById('includeStats').checked"
         )
         assert footer_checked, "Footer checkbox should sync with header"
+
+    def test_stats_checkbox_updates_token_badge_without_extra_clicks(self, app: Page):
+        """Test token badge updates after enabling stats without requiring unrelated UI clicks."""
+        pbix_path = os.path.join(TEST_FILES, "Revenue_Opportunities.pbix")
+        if not os.path.exists(pbix_path):
+            pytest.skip("Revenue_Opportunities.pbix not available")
+
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+
+        before = app.text_content("#tokenBadge")
+        app.evaluate("() => document.getElementById('includeStatsHeader').click()")
+
+        app.wait_for_function(
+            """() => /\\(\\+\\d[\\d,]* stats\\)/.test(document.getElementById('tokenBadge').textContent)""",
+            timeout=60000,
+        )
+        after = app.text_content("#tokenBadge")
+
+        assert after is not None and "stats" in after, "Token badge should include stats overhead"
+        assert after != before, "Token badge text should change after enabling stats"
 
 
 # ============================================================
