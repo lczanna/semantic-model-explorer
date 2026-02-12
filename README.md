@@ -2,6 +2,8 @@
 
 A single-file browser app for exploring Power BI semantic models and copying them as LLM-ready Markdown. Drop a file, explore the model, and paste it into ChatGPT / Claude / Copilot.
 
+Live site: https://lczanna.github.io/semantic-model-explorer/
+
 **No install. No server. No data leaves your browser.**
 
 ![Drop Zone](docs/screenshots/01-drop-zone.png)
@@ -106,7 +108,7 @@ Token estimates help plan LLM context window usage.
 python scripts/build.py
 ```
 
-Assembles `src/` source files + `lib/` dependencies into `semantic-model-explorer.html`.
+Assembles `src/` source files + `lib/` dependencies into `index.html`.
 
 Inspired by [Power Query Explorer](https://github.com/lczanna/power-query-explorer).
 
