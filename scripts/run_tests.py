@@ -16,7 +16,7 @@ import pytest
 from playwright.sync_api import Page, expect
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-HTML_PATH = os.path.join(ROOT, "semantic-model-explorer.html")
+HTML_PATH = os.path.join(ROOT, "index.html")
 TEST_FILES = os.path.join(ROOT, "data", "test-files")
 
 
@@ -2111,3 +2111,70 @@ class TestTabResetOnNewFile:
         # Verify diagram tab is not active
         diagram_btn = app.query_selector('.tab-btn[data-tab="diagram"]')
         assert "active" not in diagram_btn.get_attribute("class")
+
+
+# ============================================================
+# Responsive layout tests
+# ============================================================
+
+
+VIEWPORTS = [
+    {"name": "desktop", "width": 1280, "height": 800},
+    {"name": "tablet", "width": 768, "height": 1024},
+    {"name": "mobile", "width": 375, "height": 667},
+]
+
+
+@pytest.fixture(params=VIEWPORTS, ids=lambda v: v["name"])
+def sized_app(request, page: Page):
+    """Navigate to the app at a specific viewport size."""
+    vp = request.param
+    page.set_viewport_size({"width": vp["width"], "height": vp["height"]})
+    page.goto(f"file://{HTML_PATH}")
+    page.wait_for_selector("#dropZone", state="visible", timeout=10000)
+    return page, vp
+
+
+class TestResponsiveLayout:
+    """Test that the app renders without overflow at various screen sizes."""
+
+    def test_no_horizontal_overflow(self, sized_app):
+        page, vp = sized_app
+        overflow = page.evaluate(
+            "document.documentElement.scrollWidth > document.documentElement.clientWidth"
+        )
+        assert not overflow, f"Horizontal overflow at {vp['name']} ({vp['width']}x{vp['height']})"
+
+    def test_drop_zone_visible(self, sized_app):
+        page, vp = sized_app
+        drop = page.locator("#dropZone")
+        expect(drop).to_be_visible()
+        box = drop.bounding_box()
+        assert box is not None
+        assert box["width"] > 0
+
+    def test_header_not_clipped_after_load(self, sized_app):
+        """After loading a file, header actions should not overflow."""
+        page, vp = sized_app
+        bim_path = os.path.join(TEST_FILES, "test_model.bim")
+        if not os.path.exists(bim_path):
+            pytest.skip("test_model.bim not generated")
+        drop_file(page, bim_path)
+        wait_for_app(page)
+        header = page.locator(".app-header")
+        box = header.bounding_box()
+        assert box is not None
+        # Header should not extend beyond the viewport
+        assert box["x"] >= 0
+        assert box["x"] + box["width"] <= vp["width"] + 2  # 2px tolerance
+
+    def test_star_button_visible_after_load(self, sized_app):
+        """GitHub star button should be present in the header."""
+        page, vp = sized_app
+        bim_path = os.path.join(TEST_FILES, "test_model.bim")
+        if not os.path.exists(bim_path):
+            pytest.skip("test_model.bim not generated")
+        drop_file(page, bim_path)
+        wait_for_app(page)
+        star_btn = page.locator("#ghStarBtn")
+        expect(star_btn).to_be_visible()

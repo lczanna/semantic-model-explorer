@@ -39,7 +39,7 @@ def read_file(rel_path):
 
 def build(output_path=None):
     if output_path is None:
-        output_path = os.path.join(ROOT, 'semantic-model-explorer.html')
+        output_path = os.path.join(ROOT, 'index.html')
 
     # Read template
     template = read_file('src/template.html')

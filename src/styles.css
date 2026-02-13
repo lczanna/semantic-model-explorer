@@ -289,6 +289,11 @@ body::before {
   .data-toolbar { flex-wrap: wrap; }
   .data-table-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
   .data-toolbar-actions { width: 100%; margin-left: 0; justify-content: flex-start; }
+  .gh-star-btn .gh-star-right { display: none; }
+}
+@media (max-width: 700px) {
+  .app-header { flex-direction: column; align-items: flex-start; }
+  .header-actions { width: 100%; flex-wrap: wrap; }
 }
 
 /* DAX Syntax highlighting */
@@ -297,3 +302,28 @@ body::before {
 .dax-str { color: #80c080; }
 .dax-cm { color: #707090; font-style: italic; }
 .dax-num { color: #d09060; }
+
+/* GitHub Star Button */
+.gh-star-btn {
+  display: inline-flex; align-items: center; gap: 0;
+  border-radius: 6px; border: 1px solid var(--border);
+  overflow: hidden; font-size: 12px; font-family: var(--font);
+  cursor: pointer; text-decoration: none; line-height: 1;
+  transition: border-color 0.15s; flex-shrink: 0;
+}
+.gh-star-btn:hover { border-color: var(--accent); }
+.gh-star-left {
+  display: flex; align-items: center; gap: 5px;
+  padding: 5px 10px; background: var(--bg3); color: var(--text2);
+  transition: background 0.15s, color 0.15s;
+}
+.gh-star-btn:hover .gh-star-left { background: var(--bg4); color: var(--text); }
+.gh-star-left svg { width: 14px; height: 14px; flex-shrink: 0; }
+.gh-star-left .star-icon { color: #f0c040; }
+.gh-star-right {
+  display: flex; align-items: center;
+  padding: 5px 9px; background: var(--bg2); color: var(--text-muted);
+  border-left: 1px solid var(--border); font-family: var(--mono);
+  font-size: 11px; transition: color 0.15s;
+}
+.gh-star-btn:hover .gh-star-right { color: var(--text2); }
