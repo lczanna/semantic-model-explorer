@@ -18,7 +18,6 @@ const PROMPTS = {
   document: "Generate comprehensive documentation for this Power BI semantic model. Include a summary, table descriptions, measure explanations, and relationship overview.\n\n",
   optimize: "Analyze this Power BI semantic model and suggest performance optimizations. Look at calculated columns that should be measures, high-complexity DAX, relationship design, and model structure.\n\n",
   explain: "Explain what this Power BI model does in plain, non-technical language. Describe the business domain, key metrics, and how the tables relate to each other.\n\n",
-  roast: "Roast this Power BI semantic model. Be brutally honest and funny about bad naming conventions, questionable design choices, unnecessary complexity, missing best practices, and anything else that makes you cringe. Don't hold back.\n\n",
 };
 
 // ============================================================
