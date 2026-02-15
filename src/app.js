@@ -2428,8 +2428,3 @@ document.addEventListener('DOMContentLoaded', () => {
   initEvents();
 });
 
-// Fetch GitHub star count
-fetch('https://api.github.com/repos/lczanna/semantic-model-explorer')
-  .then(r => r.json())
-  .then(d => { if (d.stargazers_count != null) $('ghStarCount').textContent = d.stargazers_count; })
-  .catch(() => {});
