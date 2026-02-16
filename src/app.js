@@ -11,6 +11,8 @@ const appState = {
   pbixDataModel: null, // VertiPaq data model for Data tab (set after async init)
   statsCache: null, // Map<tableName, columnStats[]> — cached after first computation
   statsPromise: null, // In-flight Promise for stats computation to dedupe concurrent requests
+  bpaResults: null, // BPA analysis results
+  bpaRendered: false, // Whether BPA tab has been rendered for current model
 };
 
 const PROMPTS = {
@@ -1488,6 +1490,7 @@ function renderApp(model) {
     appState.pbixDataModel = model._pbixDataModel;
     appState.statsCache = null; // clear stats cache for new file
     appState.statsPromise = null;
+    appState.bpaRendered = false;
     initDataTab(model._pbixDataModel);
     // Show data profile checkboxes
     $('includeStatsHeaderWrap').style.display = '';
@@ -1497,6 +1500,7 @@ function renderApp(model) {
     appState.pbixDataModel = null;
     appState.statsCache = null;
     appState.statsPromise = null;
+    appState.bpaRendered = false;
     const dataTabBtn = $('dataTabBtn');
     if (dataTabBtn) dataTabBtn.style.display = 'none';
     $('includeStatsHeaderWrap').style.display = 'none';
@@ -2127,6 +2131,13 @@ function initEvents() {
         }
       });
     }
+
+    if (tab === 'bpa' && appState.model && typeof renderBpaTab === 'function') {
+      if (!appState.bpaRendered) {
+        requestAnimationFrame(() => renderBpaTab(appState.model));
+        appState.bpaRendered = true;
+      }
+    }
   });
 
   // Tree interactions
@@ -2280,6 +2291,8 @@ function initEvents() {
     appState.pbixDataModel = null;
     appState.statsCache = null;
     appState.statsPromise = null;
+    appState.bpaResults = null;
+    appState.bpaRendered = false;
     $('includeStatsHeader').checked = false;
     $('includeStats').checked = false;
     if (typeof resetDataTab === 'function') resetDataTab();

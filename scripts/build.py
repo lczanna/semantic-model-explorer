@@ -14,6 +14,7 @@ Source structure:
     src/styles.css          Application CSS
     src/app.js              Main application (parsers, UI, events)
     src/vertipaq.js         VertiPaq decoder (XPress9, ABF, SQLite, column extraction)
+    src/bpa.js              Best Practice Analyzer (rules + UI)
     src/export.js           CSV + Parquet export and Data tab UI
 
     lib/jszip.min.js        JSZip library (ZIP parsing)
@@ -56,6 +57,12 @@ def build(output_path=None):
         print('  Warning: src/vertipaq.js not found, using stub')
 
     try:
+        bpa_js = read_file('src/bpa.js')
+    except FileNotFoundError:
+        bpa_js = '// BPA module not yet implemented'
+        print('  Warning: src/bpa.js not found, using stub')
+
+    try:
         export_js = read_file('src/export.js')
     except FileNotFoundError:
         export_js = '// Export module not yet implemented'
@@ -78,6 +85,7 @@ def build(output_path=None):
     html = html.replace('{{STYLES}}', styles)
     html = html.replace('{{APP_JS}}', app_js)
     html = html.replace('{{VERTIPAQ_JS}}', vertipaq_js)
+    html = html.replace('{{BPA_JS}}', bpa_js)
     html = html.replace('{{EXPORT_JS}}', export_js)
     html = html.replace('{{JSZIP}}', jszip)
     html = html.replace('{{CYTOSCAPE}}', cytoscape)

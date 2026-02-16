@@ -314,3 +314,43 @@ body::before {
 }
 .gh-bar a:hover { color: var(--text); }
 .gh-bar a svg { width: 16px; height: 16px; flex-shrink: 0; }
+
+/* BPA Tab */
+.bpa-tab { display: flex; flex-direction: column; height: 100%; overflow-y: auto; padding: 0; }
+.bpa-summary { display: flex; align-items: center; gap: 16px; padding: 14px 18px; background: var(--bg2); border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap; }
+.bpa-score { font-size: 28px; font-weight: 700; min-width: 64px; text-align: center; padding: 4px 12px; border-radius: 8px; }
+.bpa-score-good { color: var(--accent); background: rgba(96,192,160,0.1); }
+.bpa-score-ok { color: var(--warn); background: rgba(200,138,54,0.1); }
+.bpa-score-bad { color: var(--err); background: rgba(198,83,100,0.1); }
+.bpa-summary-stats { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.bpa-stat { font-size: 14px; color: var(--text2); }
+.bpa-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+.bpa-sev-error { background: rgba(198,83,100,0.15); color: var(--err); }
+.bpa-sev-warning { background: rgba(200,138,54,0.15); color: var(--warn); }
+.bpa-sev-info { background: rgba(76,134,200,0.15); color: var(--blue); }
+.bpa-cat { background: rgba(122,103,199,0.12); color: var(--purple); }
+.bpa-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.bpa-filter { background: var(--bg3); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 12px; }
+.bpa-rules { flex: 1; overflow-y: auto; padding: 8px 18px 18px; }
+.bpa-rule { border: 1px solid var(--border-subtle); border-radius: 6px; margin-bottom: 6px; background: var(--bg2); }
+.bpa-rule[open] { border-color: var(--border); }
+.bpa-rule-header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; font-size: 13px; list-style: none; }
+.bpa-rule-header::-webkit-details-marker { display: none; }
+.bpa-rule-header::marker { display: none; content: ''; }
+.bpa-status-icon { font-size: 14px; font-weight: 700; width: 18px; text-align: center; flex-shrink: 0; }
+.bpa-status-icon.bpa-passed { color: var(--accent); }
+.bpa-status-icon.bpa-failed { color: var(--err); }
+.bpa-rule-name { font-weight: 500; color: var(--text); flex: 1; }
+.bpa-count { font-size: 11px; color: var(--text-muted); background: var(--bg3); padding: 1px 6px; border-radius: 10px; }
+.bpa-rule-id { font-size: 10px; color: var(--text-dim); font-family: monospace; }
+.bpa-rule-body { padding: 6px 12px 12px 38px; }
+.bpa-rule-desc { font-size: 12px; color: var(--text2); margin: 0 0 8px; line-height: 1.5; }
+.bpa-violations-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.bpa-violations-table th { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); color: var(--text2); font-weight: 600; white-space: nowrap; }
+.bpa-violations-table td { padding: 3px 8px; border-bottom: 1px solid var(--border-subtle); color: var(--text); }
+.bpa-violations-table tr:hover td { background: var(--hover); }
+.bpa-more { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+.bpa-empty { padding: 40px; text-align: center; color: var(--text-dim); font-size: 14px; }
+.bpa-error { color: var(--err); font-size: 12px; }
+.bpa-passed > .bpa-rule-header { opacity: 0.65; }
+.bpa-passed > .bpa-rule-header:hover { opacity: 1; }

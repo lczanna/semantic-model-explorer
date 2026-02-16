@@ -100,6 +100,7 @@
   <div class="tab-bar" id="tabBar">
     <button class="tab-btn active" data-tab="model">Model</button>
     <button class="tab-btn" data-tab="diagram">Diagram</button>
+    <button class="tab-btn" data-tab="bpa">BPA</button>
     <button class="tab-btn" data-tab="data" id="dataTabBtn" style="display:none">Data</button>
   </div>
 
@@ -165,6 +166,13 @@
     </div>
   </div>
 
+  <!-- BPA Tab -->
+  <div class="tab-content" id="tab-bpa">
+    <div class="bpa-tab" id="bpa-content">
+      <div class="detail-empty">Load a model to run the Best Practice Analyzer</div>
+    </div>
+  </div>
+
   <!-- Data Tab (visible only for .pbix with DataModel) -->
   <div class="tab-content" id="tab-data">
     <div class="data-tab">
@@ -210,6 +218,12 @@
 <script>
 'use strict';
 {{VERTIPAQ_JS}}
+</script>
+
+<!-- Best Practice Analyzer -->
+<script>
+'use strict';
+{{BPA_JS}}
 </script>
 
 <!-- Data Export: CSV + Parquet -->
