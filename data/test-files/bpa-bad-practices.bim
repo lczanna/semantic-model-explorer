@@ -1,0 +1,394 @@
+{
+  "name": "BPA Bad Practices",
+  "compatibilityLevel": 1604,
+  "model": {
+    "tables": [
+      {
+        "name": "fact_sales",
+        "columns": [
+          {
+            "name": "OrderID",
+            "dataType": "int64",
+            "sourceColumn": "OrderID"
+          },
+          {
+            "name": "Date",
+            "dataType": "dateTime",
+            "sourceColumn": "Date"
+          },
+          {
+            "name": "Value",
+            "dataType": "string",
+            "sourceColumn": "Value"
+          },
+          {
+            "name": "Amount",
+            "dataType": "double",
+            "sourceColumn": "Amount"
+          },
+          {
+            "name": "CustomerID",
+            "dataType": "int64",
+            "sourceColumn": "CustID"
+          },
+          {
+            "name": "GUID_Col",
+            "dataType": "string",
+            "sourceColumn": "guid"
+          },
+          {
+            "name": "Month Name",
+            "dataType": "string",
+            "sourceColumn": "MonthName"
+          },
+          {
+            "name": "CalcCol",
+            "dataType": "decimal",
+            "type": "calculated",
+            "expression": "fact_sales[Amount] * 1.1"
+          },
+          {
+            "name": "ExtraCol0",
+            "dataType": "string",
+            "sourceColumn": "ec0"
+          },
+          {
+            "name": "ExtraCol1",
+            "dataType": "string",
+            "sourceColumn": "ec1"
+          },
+          {
+            "name": "ExtraCol2",
+            "dataType": "string",
+            "sourceColumn": "ec2"
+          },
+          {
+            "name": "ExtraCol3",
+            "dataType": "string",
+            "sourceColumn": "ec3"
+          },
+          {
+            "name": "ExtraCol4",
+            "dataType": "string",
+            "sourceColumn": "ec4"
+          },
+          {
+            "name": "ExtraCol5",
+            "dataType": "string",
+            "sourceColumn": "ec5"
+          },
+          {
+            "name": "ExtraCol6",
+            "dataType": "string",
+            "sourceColumn": "ec6"
+          },
+          {
+            "name": "ExtraCol7",
+            "dataType": "string",
+            "sourceColumn": "ec7"
+          },
+          {
+            "name": "ExtraCol8",
+            "dataType": "string",
+            "sourceColumn": "ec8"
+          },
+          {
+            "name": "ExtraCol9",
+            "dataType": "string",
+            "sourceColumn": "ec9"
+          },
+          {
+            "name": "ExtraCol10",
+            "dataType": "string",
+            "sourceColumn": "ec10"
+          },
+          {
+            "name": "ExtraCol11",
+            "dataType": "string",
+            "sourceColumn": "ec11"
+          },
+          {
+            "name": "ExtraCol12",
+            "dataType": "string",
+            "sourceColumn": "ec12"
+          },
+          {
+            "name": "ExtraCol13",
+            "dataType": "string",
+            "sourceColumn": "ec13"
+          },
+          {
+            "name": "ExtraCol14",
+            "dataType": "string",
+            "sourceColumn": "ec14"
+          },
+          {
+            "name": "ExtraCol15",
+            "dataType": "string",
+            "sourceColumn": "ec15"
+          },
+          {
+            "name": "ExtraCol16",
+            "dataType": "string",
+            "sourceColumn": "ec16"
+          },
+          {
+            "name": "ExtraCol17",
+            "dataType": "string",
+            "sourceColumn": "ec17"
+          },
+          {
+            "name": "ExtraCol18",
+            "dataType": "string",
+            "sourceColumn": "ec18"
+          },
+          {
+            "name": "ExtraCol19",
+            "dataType": "string",
+            "sourceColumn": "ec19"
+          },
+          {
+            "name": "ExtraCol20",
+            "dataType": "string",
+            "sourceColumn": "ec20"
+          },
+          {
+            "name": "ExtraCol21",
+            "dataType": "string",
+            "sourceColumn": "ec21"
+          },
+          {
+            "name": "ExtraCol22",
+            "dataType": "string",
+            "sourceColumn": "ec22"
+          },
+          {
+            "name": "ExtraCol23",
+            "dataType": "string",
+            "sourceColumn": "ec23"
+          },
+          {
+            "name": "ExtraCol24",
+            "dataType": "string",
+            "sourceColumn": "ec24"
+          }
+        ],
+        "measures": [
+          {
+            "name": "m_Total",
+            "expression": "SUM(fact_sales[Amount])"
+          },
+          {
+            "name": "Bad Divide",
+            "expression": "[m_Total] / [Count]"
+          },
+          {
+            "name": "Error Handler",
+            "expression": "IFERROR([m_Total] / [Count], 0)"
+          },
+          {
+            "name": "Big Calc",
+            "expression": "CALCULATE(CALCULATE(SUM(fact_sales[Amount]), FILTER(fact_sales, fact_sales[Amount] > 100)))"
+          },
+          {
+            "name": "Values User",
+            "expression": "IF(HASONEVALUE(fact_sales[CustomerID]), VALUES(fact_sales[CustomerID]), BLANK())"
+          },
+          {
+            "name": "Percent Revenue",
+            "expression": "DIVIDE([m_Total], CALCULATE([m_Total], ALL(fact_sales)))",
+            "formatString": "$#,##0"
+          },
+          {
+            "name": "Count",
+            "expression": "COUNTROWS(fact_sales)"
+          },
+          {
+            "name": "AllExcept Demo",
+            "expression": "CALCULATE([m_Total], ALLEXCEPT(fact_sales, fact_sales[CustomerID]))"
+          },
+          {
+            "name": "1st Measure",
+            "expression": "1"
+          },
+          {
+            "name": "Sumx No Var",
+            "expression": "SUMX(fact_sales, fact_sales[Amount] * 1.1)"
+          },
+          {
+            "name": "Switch True",
+            "expression": "SWITCH(TRUE(), [m_Total] > 1000, \"High\", [m_Total] > 500, \"Medium\", \"Low\")"
+          },
+          {
+            "name": "Unqualified Ref",
+            "expression": "SUM([Amount])"
+          },
+          {
+            "name": "Long Measure",
+            "expression": "VAR x = SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) + SUM(fact_sales[Amount]) RETURN x",
+            "formatString": "#,0"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "p",
+            "source": {
+              "type": "m",
+              "expression": "Source"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Disconnected",
+        "columns": [
+          {
+            "name": "ID",
+            "dataType": "int64",
+            "sourceColumn": "ID"
+          },
+          {
+            "name": "Label",
+            "dataType": "string",
+            "sourceColumn": "Label"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "p",
+            "source": {
+              "type": "m",
+              "expression": "Source"
+            }
+          }
+        ]
+      },
+      {
+        "name": "EmptyTable",
+        "columns": [],
+        "partitions": []
+      },
+      {
+        "name": "HiddenWithVisible",
+        "isHidden": true,
+        "columns": [
+          {
+            "name": "ID",
+            "dataType": "int64",
+            "sourceColumn": "ID"
+          },
+          {
+            "name": "VisibleOnHidden",
+            "dataType": "string",
+            "sourceColumn": "x"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "p",
+            "source": {
+              "type": "m",
+              "expression": "Source"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Dim",
+        "columns": [
+          {
+            "name": "DimKey",
+            "dataType": "int64",
+            "sourceColumn": "DimKey"
+          },
+          {
+            "name": "Name",
+            "dataType": "string",
+            "sourceColumn": "Name"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "p",
+            "source": {
+              "type": "m",
+              "expression": "Source"
+            }
+          }
+        ]
+      },
+      {
+        "name": "LocalDateTable_001",
+        "isHidden": true,
+        "columns": [
+          {
+            "name": "Date",
+            "dataType": "dateTime",
+            "sourceColumn": "Date",
+            "isHidden": true
+          }
+        ],
+        "partitions": [
+          {
+            "name": "p",
+            "source": {
+              "type": "m",
+              "expression": "Source"
+            }
+          }
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "name": "r_bidir",
+        "fromTable": "fact_sales",
+        "fromColumn": "CustomerID",
+        "toTable": "Dim",
+        "toColumn": "DimKey",
+        "crossFilteringBehavior": "bothDirections",
+        "fromCardinality": "many",
+        "toCardinality": "one"
+      },
+      {
+        "name": "r_m2m",
+        "fromTable": "fact_sales",
+        "fromColumn": "OrderID",
+        "toTable": "Dim",
+        "toColumn": "DimKey",
+        "fromCardinality": "many",
+        "toCardinality": "many"
+      },
+      {
+        "name": "r_inactive",
+        "fromTable": "fact_sales",
+        "fromColumn": "Amount",
+        "toTable": "Dim",
+        "toColumn": "DimKey",
+        "isActive": false
+      },
+      {
+        "name": "r_misnamed",
+        "fromTable": "fact_sales",
+        "fromColumn": "OrderID",
+        "toTable": "Dim",
+        "toColumn": "DimKey"
+      }
+    ],
+    "roles": [
+      {
+        "name": "EmptyRole",
+        "tablePermissions": []
+      },
+      {
+        "name": "UsernameRole",
+        "tablePermissions": [
+          {
+            "name": "fact_sales",
+            "filterExpression": "[CustomerID] = USERNAME()"
+          }
+        ]
+      }
+    ]
+  }
+}

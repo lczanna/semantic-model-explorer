@@ -725,6 +725,302 @@ def generate_edge_case_files(output_dir):
     print(f"Generated {path}")
 
 
+def generate_bpa_test_files(output_dir):
+    """Generate BPA-specific test files to exercise various rule categories."""
+
+    # 1. Model with many BPA violations (anti-patterns)
+    bpa_bad_model = {
+        "name": "BPA Bad Practices",
+        "compatibilityLevel": 1604,
+        "model": {
+            "tables": [
+                {
+                    "name": "fact_sales",  # NAME_010: database-style prefix
+                    "columns": [
+                        {"name": "OrderID", "dataType": "int64", "sourceColumn": "OrderID"},
+                        {"name": "Date", "dataType": "dateTime", "sourceColumn": "Date"},  # NAME_006: reserved keyword
+                        {"name": "Value", "dataType": "string", "sourceColumn": "Value"},  # NAME_006: reserved keyword
+                        {"name": "Amount", "dataType": "double", "sourceColumn": "Amount"},  # PERF_006: float type
+                        {"name": "CustomerID", "dataType": "int64", "sourceColumn": "CustID"},  # META_006: visible key col
+                        {"name": "GUID_Col", "dataType": "string", "sourceColumn": "guid"},  # PERF_009: high-cardinality text
+                        {"name": "Month Name", "dataType": "string", "sourceColumn": "MonthName"},  # PERF_010: no sortByColumn
+                        {
+                            "name": "CalcCol",
+                            "dataType": "decimal",
+                            "type": "calculated",
+                            "expression": "fact_sales[Amount] * 1.1",
+                        },  # PERF_003: calculated column
+                    ] + [
+                        {"name": f"ExtraCol{i}", "dataType": "string", "sourceColumn": f"ec{i}"}
+                        for i in range(25)
+                    ],  # PERF_004: >30 cols
+                    "measures": [
+                        {
+                            "name": "m_Total",  # NAME_009: prefix on measure
+                            "expression": "SUM(fact_sales[Amount])",
+                        },  # FMT_001: no format string, META_002: no description
+                        {
+                            "name": "Bad Divide",
+                            "expression": "[m_Total] / [Count]",
+                        },  # DAX_002: / instead of DIVIDE
+                        {
+                            "name": "Error Handler",
+                            "expression": "IFERROR([m_Total] / [Count], 0)",
+                        },  # DAX_001: IFERROR
+                        {
+                            "name": "Big Calc",
+                            "expression": "CALCULATE(CALCULATE(SUM(fact_sales[Amount]), FILTER(fact_sales, fact_sales[Amount] > 100)))",
+                        },  # DAX_007: nested CALCULATE, DAX_005: FILTER on whole table
+                        {
+                            "name": "Values User",
+                            "expression": "IF(HASONEVALUE(fact_sales[CustomerID]), VALUES(fact_sales[CustomerID]), BLANK())",
+                        },  # DAX_004: VALUES instead of SELECTEDVALUE
+                        {
+                            "name": "Percent Revenue",
+                            "expression": "DIVIDE([m_Total], CALCULATE([m_Total], ALL(fact_sales)))",
+                            "formatString": "$#,##0",
+                        },  # FMT_002: % in name but no % format
+                        {
+                            "name": "Count",
+                            "expression": "COUNTROWS(fact_sales)",
+                        },  # FMT_001: no format string
+                        {
+                            "name": "AllExcept Demo",
+                            "expression": "CALCULATE([m_Total], ALLEXCEPT(fact_sales, fact_sales[CustomerID]))",
+                        },  # DAX_009: ALLEXCEPT
+                        {
+                            "name": "1st Measure",  # NAME_005: starts with number
+                            "expression": "1",
+                        },
+                        {
+                            "name": "Sumx No Var",
+                            "expression": "SUMX(fact_sales, fact_sales[Amount] * 1.1)",
+                        },  # DAX_006: SUMX without VAR
+                        {
+                            "name": "Switch True",
+                            "expression": 'SWITCH(TRUE(), [m_Total] > 1000, "High", [m_Total] > 500, "Medium", "Low")',
+                        },  # DAX_011: SWITCH(TRUE, ...)
+                        {
+                            "name": "Unqualified Ref",
+                            "expression": "SUM([Amount])",
+                        },  # DAX_012: unqualified column reference
+                        {
+                            "name": "Long Measure",
+                            "expression": "VAR x = " + " + ".join(["SUM(fact_sales[Amount])"] * 30) + " RETURN x",
+                            "formatString": "#,0",
+                        },  # DAX_010: very long expression
+                    ],
+                    "partitions": [{"name": "p", "source": {"type": "m", "expression": "Source"}}],
+                },
+                {
+                    "name": "Disconnected",  # MODEL_001: no relationships
+                    "columns": [
+                        {"name": "ID", "dataType": "int64", "sourceColumn": "ID"},
+                        {"name": "Label", "dataType": "string", "sourceColumn": "Label"},
+                    ],
+                    "partitions": [{"name": "p", "source": {"type": "m", "expression": "Source"}}],
+                },
+                {
+                    "name": "EmptyTable",  # META_008: empty table
+                    "columns": [],
+                    "partitions": [],
+                },
+                {
+                    "name": "HiddenWithVisible",
+                    "isHidden": True,
+                    "columns": [
+                        {"name": "ID", "dataType": "int64", "sourceColumn": "ID"},
+                        {"name": "VisibleOnHidden", "dataType": "string", "sourceColumn": "x"},  # META_005: visible col on hidden table
+                    ],
+                    "partitions": [{"name": "p", "source": {"type": "m", "expression": "Source"}}],
+                },
+                {
+                    "name": "Dim",  # MODEL_004 target for 1:1
+                    "columns": [
+                        {"name": "DimKey", "dataType": "int64", "sourceColumn": "DimKey"},
+                        {"name": "Name", "dataType": "string", "sourceColumn": "Name"},  # NAME_006: reserved keyword
+                    ],
+                    "partitions": [{"name": "p", "source": {"type": "m", "expression": "Source"}}],
+                },
+                {
+                    "name": "LocalDateTable_001",  # PERF_008: auto date/time table
+                    "isHidden": True,
+                    "columns": [
+                        {"name": "Date", "dataType": "dateTime", "sourceColumn": "Date", "isHidden": True},
+                    ],
+                    "partitions": [{"name": "p", "source": {"type": "m", "expression": "Source"}}],
+                },
+            ],
+            "relationships": [
+                {
+                    "name": "r_bidir",
+                    "fromTable": "fact_sales",
+                    "fromColumn": "CustomerID",
+                    "toTable": "Dim",
+                    "toColumn": "DimKey",
+                    "crossFilteringBehavior": "bothDirections",
+                    "fromCardinality": "many",
+                    "toCardinality": "one",
+                },
+                {
+                    "name": "r_m2m",
+                    "fromTable": "fact_sales",
+                    "fromColumn": "OrderID",
+                    "toTable": "Dim",
+                    "toColumn": "DimKey",
+                    "fromCardinality": "many",
+                    "toCardinality": "many",
+                },
+                {
+                    "name": "r_inactive",
+                    "fromTable": "fact_sales",
+                    "fromColumn": "Amount",
+                    "toTable": "Dim",
+                    "toColumn": "DimKey",
+                    "isActive": False,
+                },
+                {
+                    "name": "r_misnamed",
+                    "fromTable": "fact_sales",
+                    "fromColumn": "OrderID",
+                    "toTable": "Dim",
+                    "toColumn": "DimKey",
+                },  # NAME_008: different column names
+            ],
+            "roles": [
+                {
+                    "name": "EmptyRole",
+                    "tablePermissions": [],  # SEC_002: empty role
+                },
+                {
+                    "name": "UsernameRole",
+                    "tablePermissions": [
+                        {
+                            "name": "fact_sales",
+                            "filterExpression": "[CustomerID] = USERNAME()",
+                        },  # SEC_003: USERNAME instead of USERPRINCIPALNAME
+                    ],
+                },
+            ],
+        },
+    }
+    path = os.path.join(output_dir, "bpa-bad-practices.bim")
+    with open(path, "w") as f:
+        json.dump(bpa_bad_model, f, indent=2)
+    print(f"Generated {path}")
+
+    # 2. Model with zero BPA violations (clean model)
+    bpa_clean_model = {
+        "name": "BPA Clean Model",
+        "compatibilityLevel": 1604,
+        "model": {
+            "tables": [
+                {
+                    "name": "Sales",
+                    "description": "Fact table for sales transactions",
+                    "columns": [
+                        {"name": "SalesKey", "dataType": "int64", "sourceColumn": "SalesKey", "isHidden": True},
+                        {"name": "OrderDate", "dataType": "dateTime", "sourceColumn": "OrderDate", "formatString": "d/m/yyyy", "isHidden": True},
+                        {"name": "Amount", "dataType": "decimal", "sourceColumn": "Amount"},
+                        {"name": "CustomerKey", "dataType": "int64", "sourceColumn": "CustomerKey", "isHidden": True},
+                    ],
+                    "measures": [
+                        {
+                            "name": "Total Sales",
+                            "expression": "SUM(Sales[Amount])",
+                            "formatString": "$#,##0",
+                            "description": "Sum of all sales amounts",
+                            "displayFolder": "Revenue",
+                        },
+                        {
+                            "name": "Order Count",
+                            "expression": "COUNTROWS(Sales)",
+                            "formatString": "#,##0",
+                            "description": "Number of sales transactions",
+                            "displayFolder": "Counts",
+                        },
+                        {
+                            "name": "Average Sale",
+                            "expression": "DIVIDE([Total Sales], [Order Count])",
+                            "formatString": "$#,##0.00",
+                            "description": "Average sale amount",
+                            "displayFolder": "Revenue",
+                        },
+                    ],
+                    "partitions": [{"name": "Sales", "source": {"type": "m", "expression": "Source"}}],
+                },
+                {
+                    "name": "Calendar",
+                    "description": "Date dimension table",
+                    "columns": [
+                        {"name": "DateKey", "dataType": "dateTime", "sourceColumn": "DateKey", "formatString": "d/m/yyyy"},
+                        {"name": "YearNum", "dataType": "int64", "sourceColumn": "Year"},
+                        {"name": "QuarterLabel", "dataType": "string", "sourceColumn": "Quarter"},
+                        {"name": "MonthLabel", "dataType": "string", "sourceColumn": "Month", "sortByColumn": "MonthNumber"},
+                        {"name": "MonthNumber", "dataType": "int64", "sourceColumn": "MonthNumber", "isHidden": True},
+                    ],
+                    "hierarchies": [
+                        {
+                            "name": "Date Hierarchy",
+                            "levels": [
+                                {"name": "Year", "column": "YearNum"},
+                                {"name": "Quarter", "column": "QuarterLabel"},
+                                {"name": "Month", "column": "MonthLabel"},
+                            ],
+                        }
+                    ],
+                    "partitions": [{"name": "Calendar", "source": {"type": "m", "expression": "Source"}}],
+                },
+                {
+                    "name": "Customers",
+                    "description": "Customer dimension table",
+                    "columns": [
+                        {"name": "CustomerKey", "dataType": "int64", "sourceColumn": "CustomerKey", "isHidden": True},
+                        {"name": "CustomerName", "dataType": "string", "sourceColumn": "CustomerName"},
+                        {"name": "Region", "dataType": "string", "sourceColumn": "Region"},
+                    ],
+                    "partitions": [{"name": "Customers", "source": {"type": "m", "expression": "Source"}}],
+                },
+            ],
+            "relationships": [
+                {
+                    "name": "Sales_Calendar",
+                    "fromTable": "Sales",
+                    "fromColumn": "OrderDate",
+                    "toTable": "Calendar",
+                    "toColumn": "DateKey",
+                    "fromCardinality": "many",
+                    "toCardinality": "one",
+                },
+                {
+                    "name": "Sales_Customers",
+                    "fromTable": "Sales",
+                    "fromColumn": "CustomerKey",
+                    "toTable": "Customers",
+                    "toColumn": "CustomerKey",
+                    "fromCardinality": "many",
+                    "toCardinality": "one",
+                },
+            ],
+            "roles": [
+                {
+                    "name": "RegionalAccess",
+                    "tablePermissions": [
+                        {
+                            "name": "Customers",
+                            "filterExpression": "Customers[Region] = USERPRINCIPALNAME()",
+                        }
+                    ],
+                },
+            ],
+        },
+    }
+    path = os.path.join(output_dir, "bpa-clean-model.bim")
+    with open(path, "w") as f:
+        json.dump(bpa_clean_model, f, indent=2)
+    print(f"Generated {path}")
+
+
 if __name__ == "__main__":
     output_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "test-files")
     os.makedirs(output_dir, exist_ok=True)
@@ -733,4 +1029,5 @@ if __name__ == "__main__":
     generate_pbit(output_dir)
     generate_tmdl(output_dir)
     generate_edge_case_files(output_dir)
+    generate_bpa_test_files(output_dir)
     print("\nAll test files generated successfully!")

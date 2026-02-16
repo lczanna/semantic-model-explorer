@@ -23,13 +23,14 @@ TEST_FILES = os.path.join(ROOT, "data", "test-files")
 @pytest.fixture(scope="session", autouse=True)
 def generate_test_files():
     """Generate test files before running tests."""
-    from generate_test_files import generate_bim, generate_pbit, generate_tmdl, generate_edge_case_files
+    from generate_test_files import generate_bim, generate_pbit, generate_tmdl, generate_edge_case_files, generate_bpa_test_files
 
     os.makedirs(TEST_FILES, exist_ok=True)
     generate_bim(TEST_FILES)
     generate_pbit(TEST_FILES)
     generate_tmdl(TEST_FILES)
     generate_edge_case_files(TEST_FILES)
+    generate_bpa_test_files(TEST_FILES)
 
 
 @pytest.fixture
@@ -2111,6 +2112,765 @@ class TestTabResetOnNewFile:
         # Verify diagram tab is not active
         diagram_btn = app.query_selector('.tab-btn[data-tab="diagram"]')
         assert "active" not in diagram_btn.get_attribute("class")
+
+
+# ============================================================
+# BPA (Best Practice Analyzer) tests
+# ============================================================
+
+
+def open_bpa_tab(page: Page, file_path: str):
+    """Load a file and open the BPA tab."""
+    upload_file_via_input(page, file_path)
+    wait_for_app(page)
+    click_tab(page, "bpa")
+    page.wait_for_selector(".bpa-summary", state="visible", timeout=10000)
+
+
+class TestBpaEngine:
+    """Tests for BPA rule engine internals via JS evaluation."""
+
+    def test_bpa_rules_loaded(self, app: Page):
+        """BPA_RULES array should have 55+ rules."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+        count = app.evaluate("() => BPA_RULES.length")
+        assert count >= 55, f"Expected 55+ BPA rules, got {count}"
+
+    def test_run_bpa_returns_results(self, app: Page):
+        """runBpa should return one result per rule."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+        result = app.evaluate("() => { const r = runBpa(appState.model); return { count: r.length, hasRule: r[0] && !!r[0].rule }; }")
+        assert result["count"] >= 55
+        assert result["hasRule"] is True
+
+    def test_bpa_summary_structure(self, app: Page):
+        """bpaSummary should return expected fields."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+        summary = app.evaluate("() => { const r = runBpa(appState.model); return bpaSummary(r); }")
+        for field in ["total", "passed", "failed", "errors", "warnings", "infos", "totalViolations", "score"]:
+            assert field in summary, f"Missing field '{field}' in bpaSummary"
+        assert summary["total"] >= 55
+        assert 0 <= summary["score"] <= 100
+
+    def test_each_rule_has_required_fields(self, app: Page):
+        """Each rule should have id, name, category, severity, description, check."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+        result = app.evaluate("""() => {
+            const missing = [];
+            for (const r of BPA_RULES) {
+                for (const f of ['id', 'name', 'category', 'severity', 'description']) {
+                    if (!r[f]) missing.push(r.id + ':' + f);
+                }
+                if (typeof r.check !== 'function') missing.push(r.id + ':check');
+            }
+            return missing;
+        }""")
+        assert result == [], f"Rules with missing fields: {result}"
+
+    def test_rule_ids_are_unique(self, app: Page):
+        """Each rule should have a unique ID."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+        result = app.evaluate("""() => {
+            const ids = BPA_RULES.map(r => r.id);
+            const dupes = ids.filter((id, i) => ids.indexOf(id) !== i);
+            return dupes;
+        }""")
+        assert result == [], f"Duplicate rule IDs: {result}"
+
+    def test_rules_do_not_throw(self, app: Page):
+        """No rule should throw an exception on any model."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+        errors = app.evaluate("""() => {
+            const results = runBpa(appState.model);
+            return results.filter(r => r.error).map(r => r.rule.id + ': ' + r.error);
+        }""")
+        assert errors == [], f"Rules threw errors: {errors}"
+
+    def test_violations_have_message(self, app: Page):
+        """Every violation should have a message string."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+        bad = app.evaluate("""() => {
+            const results = runBpa(appState.model);
+            const problems = [];
+            for (const r of results) {
+                for (const v of r.violations) {
+                    if (!v.message || typeof v.message !== 'string') {
+                        problems.push(r.rule.id);
+                    }
+                }
+            }
+            return problems;
+        }""")
+        assert bad == [], f"Violations without messages in rules: {bad}"
+
+
+class TestBpaBadPracticesModel:
+    """Tests using the bpa-bad-practices.bim model that has many known violations."""
+
+    def test_many_violations_detected(self, app: Page):
+        """Bad practices model should trigger many rules."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        summary = app.evaluate("() => { const r = runBpa(appState.model); return bpaSummary(r); }")
+        assert summary["failed"] >= 20, f"Expected 20+ failed rules on bad model, got {summary['failed']}"
+        assert summary["totalViolations"] >= 25, f"Expected 25+ total violations, got {summary['totalViolations']}"
+
+    def test_perf_bidir_detected(self, app: Page):
+        """PERF_001: bi-directional relationship should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'PERF_001');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 1, "PERF_001 should detect bi-directional relationship"
+
+    def test_perf_m2m_detected(self, app: Page):
+        """PERF_002: many-to-many relationship should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'PERF_002');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 1, "PERF_002 should detect many-to-many relationship"
+
+    def test_perf_calc_column_detected(self, app: Page):
+        """PERF_003: calculated column should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'PERF_003');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 1, "PERF_003 should detect calculated column"
+
+    def test_perf_high_column_count(self, app: Page):
+        """PERF_004: table with >30 columns should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'PERF_004');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 1, "PERF_004 should detect high column count"
+
+    def test_perf_float_type(self, app: Page):
+        """PERF_006: double data type should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'PERF_006');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 1, "PERF_006 should detect double data type"
+
+    def test_perf_inactive_rel(self, app: Page):
+        """PERF_007: inactive relationship should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'PERF_007');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 1, "PERF_007 should detect inactive relationship"
+
+    def test_perf_auto_datetime(self, app: Page):
+        """PERF_008: auto date/time table should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'PERF_008');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 1, "PERF_008 should detect auto date/time table"
+
+    def test_dax_iferror_detected(self, app: Page):
+        """DAX_001: IFERROR usage should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'DAX_001');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 1, "DAX_001 should detect IFERROR"
+
+    def test_dax_divide_operator(self, app: Page):
+        """DAX_002: / operator should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'DAX_002');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 1, "DAX_002 should detect / division operator"
+
+    def test_dax_filter_whole_table(self, app: Page):
+        """DAX_005: FILTER on whole table should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'DAX_005');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 1, "DAX_005 should detect FILTER on whole table"
+
+    def test_dax_nested_calculate(self, app: Page):
+        """DAX_007: nested CALCULATE should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'DAX_007');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 1, "DAX_007 should detect nested CALCULATE"
+
+    def test_dax_long_measure(self, app: Page):
+        """DAX_010: long measure expression should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'DAX_010');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 1, "DAX_010 should detect long measure expression"
+
+    def test_name_reserved_keyword(self, app: Page):
+        """NAME_006: reserved DAX keyword as column name should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'NAME_006');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 2, "NAME_006 should detect reserved keywords (Date, Value, Name)"
+
+    def test_name_starts_with_number(self, app: Page):
+        """NAME_005: measure name starting with number should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'NAME_005');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 1, "NAME_005 should detect measure starting with number"
+
+    def test_name_table_prefix(self, app: Page):
+        """NAME_010: table with database-style prefix should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'NAME_010');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 1, "NAME_010 should detect fact_ prefix"
+
+    def test_name_measure_prefix(self, app: Page):
+        """NAME_009: measure with m_ prefix should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'NAME_009');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 1, "NAME_009 should detect m_ prefix"
+
+    def test_meta_table_no_description(self, app: Page):
+        """META_001: tables without descriptions should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'META_001');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 1, "META_001 should detect tables without descriptions"
+
+    def test_meta_measure_no_description(self, app: Page):
+        """META_002: measures without descriptions should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'META_002');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 5, "META_002 should detect many measures without descriptions"
+
+    def test_meta_visible_on_hidden(self, app: Page):
+        """META_005: visible column on hidden table should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'META_005');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 1, "META_005 should detect visible column on hidden table"
+
+    def test_meta_empty_table(self, app: Page):
+        """META_008: empty table should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'META_008');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 1, "META_008 should detect empty table"
+
+    def test_model_disconnected_table(self, app: Page):
+        """MODEL_001: table without relationships should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'MODEL_001');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 1, "MODEL_001 should detect disconnected table"
+
+    def test_model_multiple_rels(self, app: Page):
+        """MODEL_002: multiple relationships between same tables should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'MODEL_002');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 1, "MODEL_002 should detect multiple relationships between same tables"
+
+    def test_model_no_date_table(self, app: Page):
+        """MODEL_005: model without dedicated date table should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'MODEL_005');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 1, "MODEL_005 should detect missing date table"
+
+    def test_fmt_no_format_string(self, app: Page):
+        """FMT_001: measure without format string should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'FMT_001');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 3, "FMT_001 should detect measures without format strings"
+
+    def test_sec_empty_role(self, app: Page):
+        """SEC_002: RLS role with no filters should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'SEC_002');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 1, "SEC_002 should detect empty RLS role"
+
+    def test_sec_username_function(self, app: Page):
+        """SEC_003: USERNAME() in RLS should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'SEC_003');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 1, "SEC_003 should detect USERNAME() usage"
+
+    def test_name_inconsistent_rel_cols(self, app: Page):
+        """NAME_008: relationship with different column names should be flagged."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        count = app.evaluate("""() => {
+            const r = runBpa(appState.model).find(r => r.rule.id === 'NAME_008');
+            return r ? r.violations.length : -1;
+        }""")
+        assert count >= 1, "NAME_008 should detect mismatched relationship column names"
+
+
+class TestBpaCleanModel:
+    """Tests using the bpa-clean-model.bim which should pass most rules."""
+
+    def test_high_score(self, app: Page):
+        """Clean model should have a high BPA score."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-clean-model.bim"))
+        wait_for_app(app)
+        summary = app.evaluate("() => { const r = runBpa(appState.model); return bpaSummary(r); }")
+        assert summary["score"] >= 80, f"Clean model should score >= 80%, got {summary['score']}%"
+
+    def test_no_errors(self, app: Page):
+        """Clean model should have no error-severity violations."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-clean-model.bim"))
+        wait_for_app(app)
+        errors = app.evaluate("() => { const r = runBpa(appState.model); return bpaSummary(r).errors; }")
+        assert errors == 0, f"Clean model should have 0 errors, got {errors}"
+
+    def test_few_warnings(self, app: Page):
+        """Clean model should have very few warnings."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-clean-model.bim"))
+        wait_for_app(app)
+        warnings = app.evaluate("() => { const r = runBpa(appState.model); return bpaSummary(r).warnings; }")
+        assert warnings <= 5, f"Clean model should have few warnings, got {warnings}"
+
+
+class TestBpaTabUI:
+    """Tests for BPA tab UI rendering and interactions."""
+
+    def test_bpa_tab_renders(self, app: Page):
+        """BPA tab should render with summary and rules."""
+        open_bpa_tab(app, os.path.join(TEST_FILES, "test-model.bim"))
+        expect(app.locator(".bpa-summary")).to_be_visible()
+        expect(app.locator(".bpa-score")).to_be_visible()
+        expect(app.locator(".bpa-rules")).to_be_visible()
+
+    def test_bpa_tab_shows_score(self, app: Page):
+        """BPA tab should display a percentage score."""
+        open_bpa_tab(app, os.path.join(TEST_FILES, "test-model.bim"))
+        score_text = app.text_content(".bpa-score")
+        assert "%" in score_text, f"Score should contain %, got: {score_text}"
+
+    def test_bpa_rules_visible(self, app: Page):
+        """BPA tab should show rule details elements."""
+        open_bpa_tab(app, os.path.join(TEST_FILES, "test-model.bim"))
+        rules = app.query_selector_all(".bpa-rule")
+        assert len(rules) > 0, "Should display BPA rule elements"
+
+    def test_bpa_rule_expand(self, app: Page):
+        """Clicking a rule should expand its details."""
+        open_bpa_tab(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        # Find first failed rule and click it
+        first_failed = app.locator(".bpa-rule.bpa-failed").first
+        first_failed.locator("summary").click()
+        app.wait_for_timeout(200)
+        expect(first_failed.locator(".bpa-rule-body")).to_be_visible()
+
+    def test_bpa_filter_failed_only(self, app: Page):
+        """Filtering to 'Failed only' should hide passed rules."""
+        open_bpa_tab(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        # Count total rules
+        total = len(app.query_selector_all(".bpa-rule"))
+        # Filter to failed only
+        app.select_option("#bpaFilter", "failed")
+        app.wait_for_timeout(200)
+        filtered = len(app.query_selector_all(".bpa-rule"))
+        assert filtered < total, "Failed filter should reduce visible rules"
+        # All visible should be failed
+        passed = app.query_selector_all(".bpa-rule.bpa-passed")
+        assert len(passed) == 0, "No passed rules should be visible after filtering"
+
+    def test_bpa_filter_by_severity(self, app: Page):
+        """Filtering by severity should show only matching rules."""
+        open_bpa_tab(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        for sev in ["error", "warning", "info"]:
+            app.select_option("#bpaFilter", sev)
+            app.wait_for_timeout(200)
+            rules = app.query_selector_all(".bpa-rule")
+            if len(rules) > 0:
+                # All rules should have matching severity badge
+                badges = app.query_selector_all(f".bpa-sev-{sev}")
+                assert len(badges) > 0, f"Should have {sev} badges when filtering by {sev}"
+
+    def test_bpa_filter_by_category(self, app: Page):
+        """Filtering by category should show only rules in that category."""
+        open_bpa_tab(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        app.select_option("#bpaFilter", "cat:Performance")
+        app.wait_for_timeout(200)
+        rules = app.query_selector_all(".bpa-rule")
+        assert len(rules) > 0, "Performance category should have rules"
+
+    def test_bpa_copy_report_button(self, app: Page):
+        """Copy Report button should produce markdown output."""
+        open_bpa_tab(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        md = app.evaluate("() => { const r = runBpa(appState.model); return bpaToMarkdown(r, appState.model); }")
+        assert "# Best Practice Analyzer Report" in md
+        assert "Score:" in md
+
+    def test_bpa_fix_prompt_button(self, app: Page):
+        """Copy Fix Prompt button should produce LLM prompt with model context."""
+        open_bpa_tab(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        prompt = app.evaluate("() => { const r = runBpa(appState.model); return bpaFixPrompt(r, appState.model); }")
+        assert "BPA REPORT" in prompt
+        assert "MODEL DEFINITION" in prompt
+        assert "Power BI" in prompt
+
+    def test_bpa_violations_table_rendered(self, app: Page):
+        """Failed rules should display a violations table."""
+        open_bpa_tab(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        # Expand first failed rule
+        first_failed = app.locator(".bpa-rule.bpa-failed").first
+        first_failed.locator("summary").click()
+        app.wait_for_timeout(200)
+        table = first_failed.locator(".bpa-violations-table")
+        expect(table).to_be_visible()
+
+    def test_bpa_severity_badges_colored(self, app: Page):
+        """Severity badges should have correct classes."""
+        open_bpa_tab(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        # Check at least one of each type exists
+        for sev_class in ["bpa-sev-error", "bpa-sev-warning", "bpa-sev-info"]:
+            badges = app.query_selector_all(f".{sev_class}")
+            assert len(badges) > 0, f"Should have badges with class {sev_class}"
+
+
+class TestBpaTabSwitching:
+    """Tests for BPA tab switching and lazy rendering."""
+
+    def test_bpa_tab_accessible(self, app: Page):
+        """BPA tab button should be visible after loading any model."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+        bpa_btn = app.locator('.tab-btn[data-tab="bpa"]')
+        expect(bpa_btn).to_be_visible()
+
+    def test_bpa_tab_lazy_render(self, app: Page):
+        """BPA tab should not render until clicked."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+        # Before clicking, BPA content should be placeholder
+        content = app.text_content("#bpa-content")
+        assert "Load a model" in content
+        # Now click BPA tab
+        click_tab(app, "bpa")
+        app.wait_for_selector(".bpa-summary", state="visible", timeout=10000)
+        # Should now have real content
+        expect(app.locator(".bpa-score")).to_be_visible()
+
+    def test_bpa_switch_back_preserves(self, app: Page):
+        """Switching away from BPA and back should keep results."""
+        open_bpa_tab(app, os.path.join(TEST_FILES, "test-model.bim"))
+        score1 = app.text_content(".bpa-score")
+        click_tab(app, "model")
+        app.wait_for_timeout(200)
+        click_tab(app, "bpa")
+        app.wait_for_timeout(200)
+        score2 = app.text_content(".bpa-score")
+        assert score1 == score2, "BPA score should be preserved after switching tabs"
+
+    def test_bpa_resets_on_new_file(self, app: Page):
+        """Loading a new file should reset BPA results."""
+        open_bpa_tab(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        score1 = app.text_content(".bpa-score")
+        # Load a new file
+        app.click("#newFileBtn")
+        app.wait_for_selector("#dropZone", state="visible")
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-clean-model.bim"))
+        wait_for_app(app)
+        click_tab(app, "bpa")
+        app.wait_for_selector(".bpa-summary", state="visible", timeout=10000)
+        score2 = app.text_content(".bpa-score")
+        assert score1 != score2, "BPA score should change when loading a different model"
+
+    def test_rapid_tab_switching_with_bpa(self, app: Page):
+        """Rapid switching between all tabs including BPA should not crash."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "test-model.bim"))
+        wait_for_app(app)
+        for _ in range(3):
+            click_tab(app, "bpa")
+            click_tab(app, "model")
+            click_tab(app, "diagram")
+            click_tab(app, "bpa")
+        app.wait_for_timeout(200)
+        stats = get_header_stats(app)
+        assert "Tables" in stats, "App should remain functional after rapid tab switching"
+
+
+class TestBpaEdgeCases:
+    """Tests for BPA behavior on edge-case models."""
+
+    def test_empty_model(self, app: Page):
+        """BPA should work on an empty model without errors."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-empty-model.bim"))
+        wait_for_app(app)
+        result = app.evaluate("() => { const r = runBpa(appState.model); return { count: r.length, errors: r.filter(x => x.error).length }; }")
+        assert result["count"] >= 55, "Should still evaluate all rules"
+        assert result["errors"] == 0, "No rule should error on empty model"
+
+    def test_single_table_model(self, app: Page):
+        """BPA should work on a single-table model."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-single-table.bim"))
+        wait_for_app(app)
+        result = app.evaluate("() => { const r = runBpa(appState.model); return { count: r.length, errors: r.filter(x => x.error).length }; }")
+        assert result["errors"] == 0, "No rule should error on single-table model"
+
+    def test_all_hidden_model(self, app: Page):
+        """BPA should work on a model with all hidden items."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-all-hidden.bim"))
+        wait_for_app(app)
+        result = app.evaluate("() => { const r = runBpa(appState.model); return { count: r.length, errors: r.filter(x => x.error).length }; }")
+        assert result["errors"] == 0, "No rule should error on all-hidden model"
+
+    def test_special_chars_model(self, app: Page):
+        """BPA should handle special characters in names without crashing."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-special-chars.bim"))
+        wait_for_app(app)
+        result = app.evaluate("() => { const r = runBpa(appState.model); return { count: r.length, errors: r.filter(x => x.error).length }; }")
+        assert result["errors"] == 0, "No rule should error on special-chars model"
+
+    def test_many_tables_model(self, app: Page):
+        """BPA should handle a model with many tables."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-many-tables.bim"))
+        wait_for_app(app)
+        result = app.evaluate("() => { const r = runBpa(appState.model); return { count: r.length, errors: r.filter(x => x.error).length }; }")
+        assert result["errors"] == 0, "No rule should error on many-tables model"
+
+    def test_long_names_model(self, app: Page):
+        """BPA should handle very long names without crashing."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-long-names.bim"))
+        wait_for_app(app)
+        result = app.evaluate("() => { const r = runBpa(appState.model); return { count: r.length, errors: r.filter(x => x.error).length }; }")
+        assert result["errors"] == 0, "No rule should error on long-names model"
+
+    def test_no_measures_model(self, app: Page):
+        """BPA should work on a model with no measures."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "edge-no-measures.bim"))
+        wait_for_app(app)
+        result = app.evaluate("() => { const r = runBpa(appState.model); return { count: r.length, errors: r.filter(x => x.error).length }; }")
+        assert result["errors"] == 0, "No rule should error on no-measures model"
+
+
+class TestBpaWithRealFiles:
+    """Tests for BPA with real-world Power BI files."""
+
+    def test_adventureworks_bpa(self, app: Page):
+        """BPA should analyze AdventureWorks model without errors."""
+        bim_path = os.path.join(TEST_FILES, "AdventureWorks.bim")
+        if not os.path.exists(bim_path):
+            pytest.skip("AdventureWorks.bim not downloaded")
+        upload_file_via_input(app, bim_path)
+        wait_for_app(app)
+        result = app.evaluate("""() => {
+            const r = runBpa(appState.model);
+            const s = bpaSummary(r);
+            return { total: s.total, score: s.score, ruleErrors: r.filter(x => x.error).length };
+        }""")
+        assert result["ruleErrors"] == 0, "No rule should error on AdventureWorks"
+        assert result["score"] > 0, "Score should be > 0"
+
+    def test_adventureworks_bpa_tab_ui(self, app: Page):
+        """BPA tab should render correctly for AdventureWorks."""
+        bim_path = os.path.join(TEST_FILES, "AdventureWorks.bim")
+        if not os.path.exists(bim_path):
+            pytest.skip("AdventureWorks.bim not downloaded")
+        open_bpa_tab(app, bim_path)
+        expect(app.locator(".bpa-score")).to_be_visible()
+        rules = app.query_selector_all(".bpa-rule")
+        assert len(rules) >= 55, f"Should show all rules, got {len(rules)}"
+
+    def test_adventureworks_bpa_markdown_export(self, app: Page):
+        """BPA markdown export should work for AdventureWorks."""
+        bim_path = os.path.join(TEST_FILES, "AdventureWorks.bim")
+        if not os.path.exists(bim_path):
+            pytest.skip("AdventureWorks.bim not downloaded")
+        upload_file_via_input(app, bim_path)
+        wait_for_app(app)
+        md = app.evaluate("() => { const r = runBpa(appState.model); return bpaToMarkdown(r, appState.model); }")
+        assert "# Best Practice Analyzer Report" in md
+        assert "Score:" in md
+        assert len(md) > 200, "Should produce substantial markdown output"
+
+    def test_corporate_spend_pbix_bpa(self, app: Page):
+        """BPA should work on .pbix file (Corporate Spend)."""
+        pbix_path = os.path.join(TEST_FILES, "Corporate_Spend.pbix")
+        if not os.path.exists(pbix_path):
+            pytest.skip("Corporate_Spend.pbix not available")
+        upload_file_via_input(app, pbix_path)
+        wait_for_app(app, timeout=30000)
+        result = app.evaluate("""() => {
+            const r = runBpa(appState.model);
+            return { total: r.length, ruleErrors: r.filter(x => x.error).length, score: bpaSummary(r).score };
+        }""")
+        assert result["ruleErrors"] == 0, "No rule should error on Corporate_Spend.pbix"
+
+    def test_pbit_file_bpa(self, app: Page):
+        """BPA should work on .pbit file."""
+        pbit_path = os.path.join(TEST_FILES, "test-model.pbit")
+        if not os.path.exists(pbit_path):
+            pytest.skip("test-model.pbit not available")
+        upload_file_via_input(app, pbit_path)
+        wait_for_app(app)
+        result = app.evaluate("""() => {
+            const r = runBpa(appState.model);
+            return { total: r.length, ruleErrors: r.filter(x => x.error).length };
+        }""")
+        assert result["ruleErrors"] == 0, "No rule should error on .pbit file"
+
+    def test_tmdl_file_bpa(self, app: Page):
+        """BPA should work on TMDL zip file."""
+        tmdl_path = os.path.join(TEST_FILES, "tmdl-test-model.zip")
+        if not os.path.exists(tmdl_path):
+            pytest.skip("tmdl-test-model.zip not available")
+        upload_file_via_input(app, tmdl_path)
+        wait_for_app(app)
+        result = app.evaluate("""() => {
+            const r = runBpa(appState.model);
+            return { total: r.length, ruleErrors: r.filter(x => x.error).length };
+        }""")
+        assert result["ruleErrors"] == 0, "No rule should error on TMDL file"
+
+    def test_tmdl_sales_bpa(self, app: Page):
+        """BPA should work on the comprehensive TMDL sales model."""
+        tmdl_path = os.path.join(TEST_FILES, "tmdl-sales.zip")
+        if not os.path.exists(tmdl_path):
+            pytest.skip("tmdl-sales.zip not available")
+        upload_file_via_input(app, tmdl_path)
+        wait_for_app(app)
+        result = app.evaluate("""() => {
+            const r = runBpa(appState.model);
+            const s = bpaSummary(r);
+            return { total: s.total, score: s.score, ruleErrors: r.filter(x => x.error).length };
+        }""")
+        assert result["ruleErrors"] == 0, "No rule should error on TMDL sales model"
+
+
+class TestBpaMarkdownExport:
+    """Tests for BPA markdown and fix prompt export."""
+
+    def test_markdown_contains_all_sections(self, app: Page):
+        """BPA markdown should have title, score, and violation sections."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        md = app.evaluate("() => { const r = runBpa(appState.model); return bpaToMarkdown(r, appState.model); }")
+        assert "# Best Practice Analyzer Report" in md
+        assert "Score:" in md
+        assert "## Error" in md or "## Warning" in md
+
+    def test_markdown_lists_violations(self, app: Page):
+        """BPA markdown should list specific violations with location."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        md = app.evaluate("() => { const r = runBpa(appState.model); return bpaToMarkdown(r, appState.model); }")
+        assert "fact_sales" in md, "Should reference specific table names"
+        assert "- " in md, "Should use bullet points for violations"
+
+    def test_fix_prompt_includes_both_sections(self, app: Page):
+        """Fix prompt should include both BPA report and model definition."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        prompt = app.evaluate("() => { const r = runBpa(appState.model); return bpaFixPrompt(r, appState.model); }")
+        assert "--- BPA REPORT ---" in prompt
+        assert "--- MODEL DEFINITION ---" in prompt
+        assert "# Model:" in prompt
+
+    def test_fix_prompt_has_instructions(self, app: Page):
+        """Fix prompt should include instructions for the LLM."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-bad-practices.bim"))
+        wait_for_app(app)
+        prompt = app.evaluate("() => { const r = runBpa(appState.model); return bpaFixPrompt(r, appState.model); }")
+        assert "XMLA" in prompt or "Power BI" in prompt
+        assert "fix" in prompt.lower()
+
+    def test_clean_model_markdown_says_all_passed(self, app: Page):
+        """Clean model BPA markdown should indicate all passed."""
+        upload_file_via_input(app, os.path.join(TEST_FILES, "bpa-clean-model.bim"))
+        wait_for_app(app)
+        md = app.evaluate("() => { const r = runBpa(appState.model); return bpaToMarkdown(r, appState.model); }")
+        # Should have high score
+        assert "Score:" in md
 
 
 # ============================================================

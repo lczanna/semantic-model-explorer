@@ -1,0 +1,194 @@
+{
+  "name": "BPA Clean Model",
+  "compatibilityLevel": 1604,
+  "model": {
+    "tables": [
+      {
+        "name": "Sales",
+        "description": "Fact table for sales transactions",
+        "columns": [
+          {
+            "name": "SalesKey",
+            "dataType": "int64",
+            "sourceColumn": "SalesKey",
+            "isHidden": true
+          },
+          {
+            "name": "OrderDate",
+            "dataType": "dateTime",
+            "sourceColumn": "OrderDate",
+            "formatString": "d/m/yyyy",
+            "isHidden": true
+          },
+          {
+            "name": "Amount",
+            "dataType": "decimal",
+            "sourceColumn": "Amount"
+          },
+          {
+            "name": "CustomerKey",
+            "dataType": "int64",
+            "sourceColumn": "CustomerKey",
+            "isHidden": true
+          }
+        ],
+        "measures": [
+          {
+            "name": "Total Sales",
+            "expression": "SUM(Sales[Amount])",
+            "formatString": "$#,##0",
+            "description": "Sum of all sales amounts",
+            "displayFolder": "Revenue"
+          },
+          {
+            "name": "Order Count",
+            "expression": "COUNTROWS(Sales)",
+            "formatString": "#,##0",
+            "description": "Number of sales transactions",
+            "displayFolder": "Counts"
+          },
+          {
+            "name": "Average Sale",
+            "expression": "DIVIDE([Total Sales], [Order Count])",
+            "formatString": "$#,##0.00",
+            "description": "Average sale amount",
+            "displayFolder": "Revenue"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "Sales",
+            "source": {
+              "type": "m",
+              "expression": "Source"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Calendar",
+        "description": "Date dimension table",
+        "columns": [
+          {
+            "name": "DateKey",
+            "dataType": "dateTime",
+            "sourceColumn": "DateKey",
+            "formatString": "d/m/yyyy"
+          },
+          {
+            "name": "YearNum",
+            "dataType": "int64",
+            "sourceColumn": "Year"
+          },
+          {
+            "name": "QuarterLabel",
+            "dataType": "string",
+            "sourceColumn": "Quarter"
+          },
+          {
+            "name": "MonthLabel",
+            "dataType": "string",
+            "sourceColumn": "Month",
+            "sortByColumn": "MonthNumber"
+          },
+          {
+            "name": "MonthNumber",
+            "dataType": "int64",
+            "sourceColumn": "MonthNumber",
+            "isHidden": true
+          }
+        ],
+        "hierarchies": [
+          {
+            "name": "Date Hierarchy",
+            "levels": [
+              {
+                "name": "Year",
+                "column": "YearNum"
+              },
+              {
+                "name": "Quarter",
+                "column": "QuarterLabel"
+              },
+              {
+                "name": "Month",
+                "column": "MonthLabel"
+              }
+            ]
+          }
+        ],
+        "partitions": [
+          {
+            "name": "Calendar",
+            "source": {
+              "type": "m",
+              "expression": "Source"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Customers",
+        "description": "Customer dimension table",
+        "columns": [
+          {
+            "name": "CustomerKey",
+            "dataType": "int64",
+            "sourceColumn": "CustomerKey",
+            "isHidden": true
+          },
+          {
+            "name": "CustomerName",
+            "dataType": "string",
+            "sourceColumn": "CustomerName"
+          },
+          {
+            "name": "Region",
+            "dataType": "string",
+            "sourceColumn": "Region"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "Customers",
+            "source": {
+              "type": "m",
+              "expression": "Source"
+            }
+          }
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "name": "Sales_Calendar",
+        "fromTable": "Sales",
+        "fromColumn": "OrderDate",
+        "toTable": "Calendar",
+        "toColumn": "DateKey",
+        "fromCardinality": "many",
+        "toCardinality": "one"
+      },
+      {
+        "name": "Sales_Customers",
+        "fromTable": "Sales",
+        "fromColumn": "CustomerKey",
+        "toTable": "Customers",
+        "toColumn": "CustomerKey",
+        "fromCardinality": "many",
+        "toCardinality": "one"
+      }
+    ],
+    "roles": [
+      {
+        "name": "RegionalAccess",
+        "tablePermissions": [
+          {
+            "name": "Customers",
+            "filterExpression": "Customers[Region] = USERPRINCIPALNAME()"
+          }
+        ]
+      }
+    ]
+  }
+}
